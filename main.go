@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"log/slog"
 	"os"
@@ -17,14 +18,16 @@ import (
 var assets embed.FS
 
 func main() {
-	// Create an instance of the app structure
-	app := NewApp()
-
-	// 카메라 관리 서비스 초기화 (설정 디렉토리: ./config)
-	cameraSvc, err := api.NewCameraService("config")
+	// 백엔드 서비스 초기화 (설정 디렉토리: ./config)
+	appCtx, err := api.New("config")
 	if err != nil {
-		slog.Error("카메라 서비스 초기화 실패", "err", err)
+		slog.Error("백엔드 서비스 초기화 실패", "err", err)
 		os.Exit(1)
+	}
+
+	// 스트림 전달용 로컬 WebSocket 서버
+	if err := appCtx.StartWSServer(); err != nil {
+		slog.Warn("WebSocket 서버 시작 실패 (모니터링 스트림 사용 불가)", "err", err)
 	}
 
 	// Create application with options
@@ -36,10 +39,12 @@ func main() {
 			Assets: assets,
 		},
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
-		OnStartup:        app.startup,
+		OnShutdown: func(_ context.Context) {
+			appCtx.StopWSServer()
+		},
 		Bind: []interface{}{
-			app,
-			cameraSvc,
+			appCtx.Camera,
+			appCtx.Stream,
 		},
 	})
 

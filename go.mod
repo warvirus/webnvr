@@ -3,7 +3,11 @@ module webnvr
 go 1.27
 
 require (
+	github.com/bluenviron/gortsplib/v4 v4.16.2
+	github.com/bluenviron/mediacommon/v2 v2.4.1
 	github.com/fsnotify/fsnotify v1.10.1
+	github.com/gorilla/websocket v1.5.3
+	github.com/pion/rtp v1.8.21
 	github.com/use-go/onvif v0.0.9
 	github.com/wailsapp/wails/v2 v2.10.1
 )
@@ -11,14 +15,11 @@ require (
 require (
 	github.com/beevik/etree v1.1.0 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
-	github.com/bluenviron/gortsplib/v4 v4.16.2 // indirect
-	github.com/bluenviron/mediacommon/v2 v2.4.1 // indirect
 	github.com/elgs/gostrgen v0.0.0-20161222160715-9d61ae07eeae // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/gofrs/uuid v3.2.0+incompatible // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/jchv/go-winloader v0.0.0-20210711035445-715c2860da7e // indirect
 	github.com/juju/errors v0.0.0-20220331221717-b38fca44723b // indirect
 	github.com/labstack/echo/v4 v4.13.3 // indirect
@@ -32,7 +33,6 @@ require (
 	github.com/pion/logging v0.2.3 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
 	github.com/pion/rtcp v1.2.15 // indirect
-	github.com/pion/rtp v1.8.21 // indirect
 	github.com/pion/sdp/v3 v3.0.15 // indirect
 	github.com/pion/srtp/v3 v3.0.6 // indirect
 	github.com/pion/transport/v3 v3.0.7 // indirect

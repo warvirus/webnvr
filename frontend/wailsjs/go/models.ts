@@ -174,6 +174,24 @@ export namespace api {
 	        this.height = source["height"];
 	    }
 	}
+	export class StreamStatus {
+	    running: boolean;
+	    codec?: string;
+	    width?: number;
+	    height?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new StreamStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.running = source["running"];
+	        this.codec = source["codec"];
+	        this.width = source["width"];
+	        this.height = source["height"];
+	    }
+	}
 	export class TestDirectStreamRequest {
 	    url: string;
 	    timeoutMs: number;
@@ -305,6 +323,48 @@ export namespace camera {
 	        this.transport = source["transport"];
 	        this.protocol = source["protocol"];
 	        this.buffer_size = source["buffer_size"];
+	    }
+	}
+
+}
+
+export namespace stream {
+	
+	export class Hub {
+	
+	
+	    static createFrom(source: any = {}) {
+	        return new Hub(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	
+	    }
+	}
+
+}
+
+export namespace ws {
+	
+	export class PTZCommand {
+	    action: string;
+	    pan?: number;
+	    tilt?: number;
+	    zoom?: number;
+	    presetToken?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PTZCommand(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.action = source["action"];
+	        this.pan = source["pan"];
+	        this.tilt = source["tilt"];
+	        this.zoom = source["zoom"];
+	        this.presetToken = source["presetToken"];
 	    }
 	}
 

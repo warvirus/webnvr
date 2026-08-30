@@ -17,35 +17,35 @@ import (
 
 // CameraDTO는 프론트엔드로 전달되는 카메라 정보다. 비밀번호는 노출하지 않는다.
 type CameraDTO struct {
-	ID           string             `json:"id"`
-	Name         string             `json:"name"`
-	Type         camera.CameraType  `json:"type"`
-	XAddr        string             `json:"xaddr"`
-	Username     string             `json:"username"`
-	HasPassword  bool               `json:"hasPassword"`
-	ProfileToken string             `json:"profileToken"`
-	StreamURL    string             `json:"streamUrl"`
-	StreamConfig camera.StreamConfig `json:"streamConfig"`
-	PTZSupported bool               `json:"ptzSupported"`
-	GroupID      string             `json:"groupId"`
-	LayoutOrder  int                `json:"layoutOrder"`
-	Enabled      bool               `json:"enabled"`
-	AddedAt      string             `json:"addedAt"`
-	UpdatedAt    string             `json:"updatedAt"`
-}
-
-// CreateCameraRequest는 카메라 생성 요청이다.
-type CreateCameraRequest struct {
+	ID           string              `json:"id"`
 	Name         string              `json:"name"`
 	Type         camera.CameraType   `json:"type"`
 	XAddr        string              `json:"xaddr"`
 	Username     string              `json:"username"`
-	Password     string              `json:"password"`
+	HasPassword  bool                `json:"hasPassword"`
 	ProfileToken string              `json:"profileToken"`
 	StreamURL    string              `json:"streamUrl"`
-	StreamConfig *camera.StreamConfig `json:"streamConfig"`
+	StreamConfig camera.StreamConfig `json:"streamConfig"`
 	PTZSupported bool                `json:"ptzSupported"`
 	GroupID      string              `json:"groupId"`
+	LayoutOrder  int                 `json:"layoutOrder"`
+	Enabled      bool                `json:"enabled"`
+	AddedAt      string              `json:"addedAt"`
+	UpdatedAt    string              `json:"updatedAt"`
+}
+
+// CreateCameraRequest는 카메라 생성 요청이다.
+type CreateCameraRequest struct {
+	Name         string               `json:"name"`
+	Type         camera.CameraType    `json:"type"`
+	XAddr        string               `json:"xaddr"`
+	Username     string               `json:"username"`
+	Password     string               `json:"password"`
+	ProfileToken string               `json:"profileToken"`
+	StreamURL    string               `json:"streamUrl"`
+	StreamConfig *camera.StreamConfig `json:"streamConfig"`
+	PTZSupported bool                 `json:"ptzSupported"`
+	GroupID      string               `json:"groupId"`
 }
 
 // UpdateCameraRequest는 카메라 수정 요청이다. nil 필드는 변경하지 않는다.
@@ -64,7 +64,7 @@ type UpdateCameraRequest struct {
 
 // DiscoveredCamera는 WS-Discovery로 발견된 카메라 후보다.
 type DiscoveredCamera struct {
-	XAddr string `json:"xaddr"`
+	XAddr  string `json:"xaddr"`
 	Scopes string `json:"scopes"`
 }
 
@@ -124,22 +124,6 @@ type TestDirectStreamResponse struct {
 type CameraService struct {
 	mgr    *camera.Manager
 	appCfg *config.AppConfig
-}
-
-// NewCameraService는 설정 디렉토리를 기준으로 서비스를 초기화한다.
-func NewCameraService(configDir string) (*CameraService, error) {
-	appCfg, err := config.Load(fmt.Sprintf("%s/app.json", configDir))
-	if err != nil {
-		return nil, fmt.Errorf("앱 설정 로드 실패: %w", err)
-	}
-	if err := config.Validate(appCfg); err != nil {
-		return nil, fmt.Errorf("앱 설정 검증 실패: %w", err)
-	}
-	store, err := camera.NewJSONCameraStore(fmt.Sprintf("%s/cameras.json", configDir))
-	if err != nil {
-		return nil, fmt.Errorf("카메라 저장소 초기화 실패: %w", err)
-	}
-	return &CameraService{mgr: camera.NewManager(store), appCfg: appCfg}, nil
 }
 
 // ListCameras는 모든 카메라를 반환한다.
