@@ -56,6 +56,20 @@
 
 ---
 
+## 2026-08-31 — Phase 1.4 작업 중 결정/발견
+
+### D9. use-go/onvif SDK 응답 파싱 한계와 우회
+- **상황**: SDK 생성 응답 구조체의 네임스페이스 태그(`xml:"onvif:Resolution"` 등)는 Go encoding/xml에서 실제 카메라 응답(trt:/tt: 접두어)과 매칭되지 않음. 실험으로 확인 (해상도 등 중첩 필드가 0으로 파싱됨). 또한 GetPresetsResponse가 슬라이스가 아닌 단일 필드로 정의되어 있음.
+- **결정**: Profiles와 Presets는 `dev.CallMethod()` raw 호출 후 자체 파싱 구조체로 처리. StreamURI/DeviceInformation/PTZ 명령은 SDK 헬퍼 그대로 사용(해당 응답은 정상 파싱됨).
+- **영향**: 실제 카메라 연동(Phase 2.6)에서도 프로필/프리셋 파싱은 안전. SDK 업그레이드 시 재검토.
+
+### D10. WS-Discovery 구현 세부
+- **상황**: use-go/onvif의 ws-discovery.SendProbe는 인터페이스별 응답 대기가 내부적으로 1초 고정이며, 응답을 raw XML 문자열로 반환.
+- **결정**: Discover(interfaces)는 인터페이스 목록을 순차 프로브하고 raw XML에서 XAddrs/Scopes를 파싱해 중복 제거 후 반환. 카메라 이름은 Scopes의 `onvif://.../name/...`에서 추출.
+- **영향**: 스캔 타임아웃(app.json의 scan_timeout_ms)은 API 계층에서 래퍼 수준으로 적용 예정.
+
+---
+
 ## 작업 중 발견 사항
 
 (작업 진행 중 발견한 이슈와 해결 방법을 여기에 추가)

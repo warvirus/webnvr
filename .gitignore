@@ -4,3 +4,6 @@ frontend/dist
 
 # go build으로 생성되는 로컬 바이너리
 /webnvr
+
+# 런타임 생성 설정
+/config/

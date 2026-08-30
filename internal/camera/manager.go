@@ -159,6 +159,14 @@ func (m *Manager) Reorder(ids []string) error {
 	return m.store.Reorder(ids)
 }
 
+// PasswordOf는 저장된 암호문을 평문으로 복호화한다. 스트림 연결 시 사용된다.
+func (m *Manager) PasswordOf(cam *Camera) (string, error) {
+	if cam.Password == "" {
+		return "", nil
+	}
+	return config.DecryptSecret(cam.ID, cam.Password)
+}
+
 // validateCreate는 생성 요청을 검증한다.
 func (m *Manager) validateCreate(req CreateRequest) error {
 	if strings.TrimSpace(req.Name) == "" {

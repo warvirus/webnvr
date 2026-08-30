@@ -27,12 +27,12 @@
   - [ ] manager.go — 타입별 분기 로직 + reorder
   - [ ] `go test ./internal/camera/` 통과
   - [ ] semantic commit: "카메라 관리 모듈 추가"
-- [ ] 1.4 internal/onvif/
-  - [ ] client.go — use-go/onvif SDK 래퍼
-  - [ ] discovery.go — WS-Discovery
-  - [ ] profiles.go, stream_uri.go, ptz.go
-  - [ ] mock 단위 테스트 통과
-  - [ ] semantic commit: "ONVIF 클라이언트 모듈 추가"
+- [x] 1.4 internal/onvif/
+  - [x] client.go — use-go/onvif SDK 래퍼
+  - [x] discovery.go — WS-Discovery
+  - [x] profiles.go, stream_uri.go, ptz.go
+  - [x] SOAP 목업 서버 단위 테스트 통과
+  - [x] semantic commit: "ONVIF 클라이언트 모듈 추가"
 - [ ] 1.5 internal/api/
   - [ ] camera.go — CameraService (doc §5.1 계약 전체)
   - [ ] events.go — 프론트엔드 이벤트 emit
