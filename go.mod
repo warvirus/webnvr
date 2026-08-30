@@ -1,8 +1,11 @@
 module webnvr
 
-go 1.23
+go 1.27
 
-require github.com/wailsapp/wails/v2 v2.10.1
+require (
+	github.com/fsnotify/fsnotify v1.10.1
+	github.com/wailsapp/wails/v2 v2.10.1
+)
 
 require (
 	github.com/bep/debounce v1.2.1 // indirect
