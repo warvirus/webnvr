@@ -4,6 +4,7 @@ import {
   CreateCamera,
   DeleteCamera,
   DiscoverONVIFCameras,
+  GetCameraPresets,
   GetONVIFProfiles,
   GetONVIFStreamURI,
   ListCameras,
@@ -31,6 +32,7 @@ interface CameraState {
   testDirectStream: (req: api.TestDirectStreamRequest) => Promise<api.TestDirectStreamResponse>;
   getProfiles: (req: api.GetProfilesRequest) => Promise<api.ProfileDTO[]>;
   getStreamURI: (req: api.GetStreamURIRequest) => Promise<string>;
+  getCameraPresets: (cameraId: string) => Promise<api.PresetDTO[]>;
 }
 
 export const useCameraStore = create<CameraState>((set, get) => ({
@@ -133,6 +135,7 @@ export const useCameraStore = create<CameraState>((set, get) => ({
   testDirectStream: (req) => TestDirectStream(req),
   getProfiles: (req) => GetONVIFProfiles(req),
   getStreamURI: (req) => GetONVIFStreamURI(req),
+  getCameraPresets: (cameraId) => GetCameraPresets(cameraId),
 }));
 
 // 카메라를 layout_order 순으로 정렬해 반환하는 셀렉터

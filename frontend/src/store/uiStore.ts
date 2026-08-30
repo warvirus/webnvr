@@ -1,5 +1,6 @@
-// UI 전역 상태(페이지, 모달, 토스트)를 관리하는 Zustand 스토어
+// UI 전역 상태(페이지, 모달, 토스트, 그리드)를 관리하는 Zustand 스토어
 import {create} from 'zustand';
+import {GridMode} from '../types';
 
 export type Page = 'monitoring' | 'management';
 
@@ -19,11 +20,13 @@ interface UIState {
   currentPage: Page;
   cameraModal: CameraModalState | null;
   toasts: Toast[];
+  gridMode: GridMode;
   setPage: (p: Page) => void;
   openCameraModal: (state: CameraModalState) => void;
   closeCameraModal: () => void;
   pushToast: (kind: Toast['kind'], text: string) => void;
   dismissToast: (id: number) => void;
+  setGridMode: (m: GridMode) => void;
 }
 
 let toastSeq = 1;
@@ -32,6 +35,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   currentPage: 'management',
   cameraModal: null,
   toasts: [],
+  gridMode: 'auto',
   setPage: (p) => set({currentPage: p}),
   openCameraModal: (state) => set({cameraModal: state}),
   closeCameraModal: () => set({cameraModal: null}),
@@ -41,4 +45,5 @@ export const useUIStore = create<UIState>((set, get) => ({
     setTimeout(() => get().dismissToast(id), 4200);
   },
   dismissToast: (id) => set({toasts: get().toasts.filter(t => t.id !== id)}),
+  setGridMode: (m) => set({gridMode: m}),
 }));
