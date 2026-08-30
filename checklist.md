@@ -41,27 +41,28 @@
 
 ## Phase 2: 스트림 코어 + WebSocket
 
-- [ ] 2.1 RTSP 클라이언트 (TCP/UDP, Digest 인증, 세션 관리)
-  - [ ] 라이브러리 최종 확정 (gortsplib/v4 vs pion/rtsp — 실행 시 재확인)
-  - [ ] mock RTSP 서버 테스트 통과
-  - [ ] semantic commit: "RTSP 클라이언트 추가"
-- [ ] 2.2 RTP 디페이로더 — H.264(RFC 6184), H.265(RFC 7798)
-  - [ ] 단위 테스트 통과
-  - [ ] semantic commit: "RTP 디페이로더 추가"
-- [ ] 2.3 Stream Hub
-  - [ ] 구독자 관리 + 30프레임 버퍼 + 느린 구독자 드롭
-  - [ ] 백프레셔 테스트 통과
-  - [ ] semantic commit: "스트림 허브 추가"
-- [ ] 2.4 internal/ws/ — gorilla/websocket 서버
-  - [ ] JSON 프로토콜 (doc §5.3) 구현
-  - [ ] 하트비트 ping/pong
-  - [ ] WS 통합 테스트 통과
-  - [ ] semantic commit: "WebSocket 서버 추가"
-- [ ] 2.5 internal/api/stream.go — StreamService 바인딩
-  - [ ] 컴파일 확인
-  - [ ] semantic commit: "Stream API 바인딩 추가"
+- [x] 2.1 RTSP 클라이언트 (TCP/UDP, Digest 인증, 세션 관리)
+  - [x] 라이브러리 확정: gortsplib/v4 v4.16.2 (pion/rtsp는 모듈 소멸, v4.16.3은 불완전 릴리스)
+  - [x] 로컬 RTSP 서버 통합 테스트 통과
+  - [x] semantic commit: "스트림 코어 추가"
+- [x] 2.2 RTP 디페이로더 — H.264(RFC 6184), H.265(RFC 7798)
+  - [x] gortsplib 내장 rtph264/rtph265 디코더 사용 (별도 구현 불필요 — D11)
+  - [x] SPS 해상도 파싱 테스트 통과 (mediacommon h264.SPS)
+- [x] 2.3 Stream Hub
+  - [x] 구독자 관리 + 30프레임 버퍼 + 느린 구독자 드롭
+  - [x] 백프레셔 테스트 통과
+- [x] 2.4 internal/ws/ — gorilla/websocket 서버
+  - [x] JSON 프로토콜 (doc §5.3) 구현
+  - [x] 하트비트 (JSON ping/pong + WS ping 프레임)
+  - [x] WS 통합 테스트 통과
+  - [x] semantic commit: "WebSocket 서버 추가"
+- [x] 2.5 internal/api/stream.go — StreamService 바인딩
+  - [x] ws.Controller + Wails 바인딩 이중 역할, api.New 조립
+  - [x] wails build 성공
+  - [x] semantic commit: "Stream API 바인딩 및 WS 서버 통합"
 - [ ] 2.6 실제 카메라(192.168.0.217) 단일 스트림 수동 테스트
-  - [ ] 사용자에게 수동 테스트 절차 안내
+  - [ ] 사용자에게 수동 테스트 절차 안내 완료
+  - [ ] 테스트 결과 기록
 
 ## 제외/연기 항목 (이번 세션 대상 아님)
 

@@ -68,8 +68,8 @@
 | 2.1 RTSP 클라이언트 (TCP/UDP, Digest, 세션) | ✅ 완료 | 2026-08-31 01:20 (commit 4ba94b6, gortsplib/v4 v4.16.2 확정 — v4.16.3은 불완전 릴리스) |
 | 2.2 RTP 디페이로더 (H.264 RFC 6184, H.265 RFC 7798) | ✅ 완료 | 2026-08-31 01:20 (gortsplib 내장 rtph264/rtph265 디코더 사용 — 별도 구현 불필요) |
 | 2.3 Stream Hub (구독자, 30프레임 버퍼, 백프레셔) | ✅ 완료 | 2026-08-31 01:20 (commit 4ba94b6, 백프레셔/통합 테스트 통과) |
-| 2.4 WebSocket 서버 (JSON 프로토콜, 하트비트) | ⏳ 대기 | — |
-| 2.5 StreamService 바인딩 | ⏳ 대기 | — |
+| 2.4 WebSocket 서버 (JSON 프로토콜, 하트비트) | ✅ 완료 | 2026-08-31 01:43 (commit d3113ac, WS 통합 테스트 통과) |
+| 2.5 StreamService 바인딩 | ✅ 완료 | 2026-08-31 01:52 (commit 601c949, wails build 성공) |
 | 2.6 실제 카메라(192.168.0.217) 단일 스트림 수동 테스트 | ⏳ 대기 | — |
 
 ---
@@ -99,9 +99,9 @@
 
 ## 다음 세션 재개 지점
 
-- **재개 위치**: Phase 1.1 완료 (wails build 성공). 골격 커밋 후 Phase 1.2 (internal/config/) 시작
-- **다음 작업**: 골격 semantic commit → internal/config/ 구현 (config.go, loader.go, watcher.go, encryption.go, validator.go) → go test
-- **미해결 이슈**: 없음 (wails CLI 재빌드로 해소 — T1 참조)
+- **재개 위치**: Phase 1~2 백엔드 전체 완료. Phase 2.6(실제 카메라 수동 테스트)만 남음 — 사용자가 192.168.0.217 카메라로 확인 예정
+- **다음 작업**: 2.6 수동 테스트 결과 기록 → 이번 세션 종료 후 다음 세션에서 Phase 3(프론트엔드 카메라 관리 UI) 시작
+- **미해결 이슈**: 없음
 
 ---
 
@@ -117,6 +117,9 @@
 | 2026-08-30 23:08 | 계획대로 진행 승인 | Phase 0 실행 시작 |
 | 2026-08-30 23:08~23:15 | (자동) Phase 0 완료: 3개 문서 생성 + 첫 커밋 e95c402 | checklist.md 체크 갱신 |
 | 2026-08-30 23:16~23:52 | (자동) Phase 1.1: wails init → 루트 이동. wails build 실패 → 원인 추적 → **wails CLI 재빌드로 해소 (T1)** → 빌드 성공 | build/bin/webnvr.app 생성 확인 |
+| 2026-08-30 23:53~2026-08-31 00:57 | (자동) Phase 1.2~1.5: config/camera/onvif/api 모듈 구현 + 테스트 + 4개 semantic commit (ddd83da, 9104edb, 2e43425, 77d9f3f) | go test/race 전부 통과, wails 바인딩 생성 확인 |
+| 2026-08-31 01:06~01:20 | (자동) Phase 2.1~2.3: 스트림 코어 구현 (commit 4ba94b6). gortsplib v4.16.2 확정, 로컬 RTSP 서버 통합 테스트 포함 | 백프레셔/통합 테스트 통과 |
+| 2026-08-31 01:30~01:52 | (자동) Phase 2.4~2.5: WS 서버 + StreamService (d3113ac, 601c949). main.go 전체 조립, 임시 랜딩 UI 교체 | wails build 성공, 전체 테스트 통과 |
 
 ---
 
