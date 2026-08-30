@@ -26,6 +26,7 @@ interface CodecConfig {
 const TICK_MS = 30;          // 큐 처리 주기 (지터 스무딩)
 const MAX_QUEUE = 150;       // 큐 상한 초과 시 가장 오래된 패킷 드롭
 const STATS_MS = 1000;
+const WATCHDOG_PACKETS = 60; // 이 만큼 패킷이 왔는데 프레임이 없으면 진단 에러 발행
 
 const START_CODE = new Uint8Array([0, 0, 0, 1]);
 
@@ -90,11 +91,12 @@ function isParamSet(codec: 'h264' | 'h265', n: Uint8Array): boolean {
 // ───────────────────────────────────────────────────────────
 
 // Session은 카메라 하나의 디코딩 파이프라인이다.
+// 디코더 설정은 동기적으로 수행해 프레임 누적과의 레이스를 원천 차단한다.
 class Session {
   cameraId: string;
   config: CodecConfig | null = null;
   decoder: VideoDecoder | null = null;
-  configured = false;
+  candidateIdx = 0;
   sawKeyframe = false;
 
   queue: PacketIn[] = [];
@@ -109,11 +111,18 @@ class Session {
   streamPps: Uint8Array | null = null;
   streamVps: Uint8Array | null = null;
 
-  // 통계
-  bytes = 0;
+  // 디코더가 준비되기 전 도착한 키프레임 보관 (1개면 충분)
+  heldKey: {nalus: Uint8Array[]; ts: number} | null = null;
+
+  // 진단
   packets = 0;
   frames = 0;
   drops = 0;
+  diagSent = false;
+  lastError = '';
+
+  // 통계
+  bytes = 0;
   lastStats = 0;
   lastFrames = 0;
   lastBytes = 0;
@@ -122,63 +131,88 @@ class Session {
     this.cameraId = cameraId;
   }
 
-  hasDecoder(): boolean {
-    return this.decoder !== null && this.decoder.state === 'configured';
+  // paramSets는 유효한 파라미터 셋을 반환한다.
+  private paramSets(): {sps: Uint8Array | null; pps: Uint8Array | null; vps: Uint8Array | null} {
+    const codec = this.config?.codec ?? 'h264';
+    return {
+      sps: this.config && this.config.sps.length ? this.config.sps : this.streamSps,
+      pps: this.config && this.config.pps.length ? this.config.pps : this.streamPps,
+      vps: codec === 'h265' ? (this.config && this.config.vps.length ? this.config.vps : this.streamVps) : null,
+    };
   }
 
-  // tryConfigure는 파라미터 셋이 준비되면 디코더를 만든다.
-  async tryConfigure(): Promise<void> {
-    if (this.configured || !this.config) return;
-    const codec = this.config.codec;
-    const sps = this.config.sps.length ? this.config.sps : this.streamSps;
-    const pps = this.config.pps.length ? this.config.pps : this.streamPps;
-    if (!sps || !pps || sps.length === 0 || pps.length === 0) return;
+  // prepareDecoder는 외부(config 수신 시점)에서 디코더 준비를 트리거한다.
+  prepareDecoder(): boolean {
+    return this.ensureDecoder();
+  }
 
-    let codecStr = '';
-    if (codec === 'h264') {
-      if (sps.length < 4) return;
-      codecStr = h264CodecString(sps);
-    } else {
-      // H.265는 일반적인 Main 프로필 문자열을 시도한다
-      codecStr = 'hev1.1.6.L93.B0';
+  // ensureDecoder는 디코더를 동기적으로 준비한다. 실패한 코덱 문자열은 순차 폴백한다.
+  private ensureDecoder(): boolean {
+    if (this.decoder && this.decoder.state === 'configured') return true;
+    if (this.decoder) {
+      try {
+        this.decoder.close();
+      } catch { /* 무시 */ }
+      this.decoder = null;
+    }
+    if (!this.config) return false;
+
+    const {sps, pps} = this.paramSets();
+    if (!sps || !pps || sps.length === 0 || pps.length === 0) return false;
+    if (this.config.codec === 'h264' && sps.length < 4) return false;
+
+    const candidates = this.config.codec === 'h264'
+      ? [h264CodecString(sps), 'avc1.64001f', 'avc1.42E01E']
+      : ['hev1.1.6.L93.B0', 'hev1.1.6.L120.90'];
+
+    // 실패한 후보는 건너뛴다
+    while (this.candidateIdx < candidates.length) {
+      const codecStr = candidates[this.candidateIdx];
+      const attempt = (hw: boolean): VideoDecoder | null => {
+        try {
+          const dec = new VideoDecoder({
+            output: (frame: VideoFrame) => {
+              ctx.postMessage({type: 'frame', cameraId: this.cameraId, frame}, [frame]);
+            },
+            error: (e: DOMException) => {
+              this.lastError = `디코더 오류: ${e.message}`;
+              this.decoder = null;
+            },
+          });
+          const cfg: VideoDecoderConfig = {
+            codec: codecStr,
+            optimizeForLatency: true,
+          };
+          if (hw) cfg.hardwareAcceleration = 'prefer-hardware';
+          dec.configure(cfg);
+          return dec;
+        } catch (e) {
+          // 동기 설정 실패 → 다음 시도
+          try {
+            void e;
+          } catch { /* 무시 */ }
+          return null;
+        }
+      };
+
+      let dec = attempt(true);
+      if (dec === null) dec = attempt(false); // 하드웨어 선호 실패 시 소프트웨어
+      if (dec !== null) {
+        this.decoder = dec;
+        return true;
+      }
+      this.candidateIdx++;
     }
 
-    try {
-      const support = await VideoDecoder.isConfigSupported({
-        codec: codecStr,
-        optimizeForLatency: true,
-        hardwareAcceleration: 'prefer-hardware',
-      });
-      if (!support.supported) {
-        // 폴백 문자열 시도
-        codecStr = codec === 'h264' ? 'avc1.42E01E' : 'hev1.1.6.L120.90';
-      }
-      const dec = new VideoDecoder({
-        output: (frame: VideoFrame) => {
-          const cameraId = this.cameraId;
-          ctx.postMessage({type: 'frame', cameraId, frame}, [frame]);
-        },
-        error: (e: DOMException) => {
-          this.configured = false;
-          this.decoder = null;
-          ctx.postMessage({type: 'error', cameraId: this.cameraId, message: `디코더 오류: ${e.message}`});
-        },
-      });
-      dec.configure({
-        codec: codecStr,
-        optimizeForLatency: true,
-        hardwareAcceleration: 'prefer-hardware',
-      });
-      this.decoder = dec;
-      this.configured = true;
-    } catch (e) {
-      this.configured = false;
+    if (this.candidateIdx >= candidates.length && !this.diagSent) {
+      this.diagSent = true;
       ctx.postMessage({
         type: 'error',
         cameraId: this.cameraId,
-        message: `디코더 설정 실패 (${codecStr}): ${String(e)}`,
+        message: `이 환경에서 ${this.config.codec} 디코더 설정에 실패했습니다 (WebCodecs 미지원 가능)`,
       });
     }
+    return false;
   }
 
   // push는 패킷을 큐에 시퀀스 순으로 삽입한다.
@@ -205,6 +239,20 @@ class Session {
   flush() {
     const due = this.queue.splice(0);
     for (const p of due) this.processPacket(p);
+    this.watchdog();
+  }
+
+  // watchdog는 패킷은 오는데 프레임이 안 나오는 상태를 UI로 알린다.
+  private watchdog() {
+    if (!this.diagSent && this.packets > WATCHDOG_PACKETS && this.frames === 0) {
+      const ready = this.ensureDecoder();
+      this.diagSent = true;
+      ctx.postMessage({
+        type: 'error',
+        cameraId: this.cameraId,
+        message: `패킷 ${this.packets}개 수신 중이나 디코딩 결과가 없습니다 (디코더 준비: ${ready ? '완료' : '미완료'}, 키프레임: ${this.sawKeyframe ? '수신' : '대기'})`,
+      });
+    }
   }
 
   // processPacket은 RTP 페이로드를 디페이즈해 NALU로 누적한다.
@@ -228,62 +276,85 @@ class Session {
     if (p.marker) this.completeFrame();
   }
 
-  // completeFrame은 누적 NALU를 Annex B로 조립해 디코더에 넣는다.
+  // completeFrame은 누적 NALU를 즉시 Annex B로 조립해 디코더에 넣는다 (동기, 레이스 없음)
   private completeFrame() {
     if (this.frameNalus.length === 0) return;
     const codec = this.config?.codec ?? 'h264';
     const isKey = this.frameIsKey;
     this.frameIsKey = false;
+    const nalus = this.frameNalus;
+    const ts = this.frameTs;
+    this.frameNalus = [];
 
     // 키프레임 이전의 델타 프레임은 폐기한다 (중간 참여 대응)
     if (!this.sawKeyframe) {
       if (!isKey) {
-        this.frameNalus = [];
         this.drops++;
         return;
       }
       this.sawKeyframe = true;
     }
 
-    void this.tryConfigure().then(() => {
-      if (!this.hasDecoder()) {
-        this.frameNalus = [];
-        return;
-      }
-      const parts: Uint8Array[] = [];
+    // 디코더가 아직 준비되지 않았으면 키프레임을 보관하고 대기한다
+    if (!this.ensureDecoder()) {
       if (isKey) {
-        // 키프레임 앞에 파라미터 셋을 삽입한다
-        const sps = this.config?.sps.length ? this.config.sps : this.streamSps;
-        const pps = this.config?.pps.length ? this.config.pps : this.streamPps;
-        const vps = this.config?.vps.length ? this.config.vps : this.streamVps;
-        if (codec === 'h265' && vps) parts.push(START_CODE, vps);
-        if (sps) parts.push(START_CODE, sps);
-        if (pps) parts.push(START_CODE, pps);
-      }
-      for (const n of this.frameNalus) parts.push(START_CODE, n);
-      this.frameNalus = [];
-
-      const data = concatBytes(parts);
-      const clockRate = this.config?.clockRate ?? 90000;
-      const chunk = new EncodedVideoChunk({
-        type: isKey ? 'key' : 'delta',
-        timestamp: Math.round((this.frameTs * 1_000_000) / clockRate),
-        data,
-      });
-      this.frames++;
-      try {
-        this.decoder!.decode(chunk);
-      } catch {
-        // 디코더 상태 이상 → 다음 키프레임에서 재설정
-        this.configured = false;
-        this.sawKeyframe = false;
-        try {
-          this.decoder?.close();
-        } catch { /* 무시 */ }
-        this.decoder = null;
+        this.heldKey = {nalus, ts};
+      } else {
         this.drops++;
       }
+      return;
+    }
+
+    // 보관했던 키프레임을 먼저 디코딩한다
+    if (this.heldKey) {
+      const held = this.heldKey;
+      this.heldKey = null;
+      this.decodeFrame(held.nalus, held.ts, true);
+    }
+    this.decodeFrame(nalus, ts, isKey);
+  }
+
+  // decodeFrame은 NALU 목록을 Annex B 청크로 만들어 디코더에 넣는다.
+  private decodeFrame(nalus: Uint8Array[], ts: number, isKey: boolean) {
+    if (!this.decoder || this.decoder.state !== 'configured') {
+      this.drops++;
+      return;
+    }
+    const parts: Uint8Array[] = [];
+    if (isKey) {
+      // 키프레임 앞에 파라미터 셋을 삽입한다
+      const {sps, pps, vps} = this.paramSets();
+      if (vps) parts.push(START_CODE, vps);
+      if (sps) parts.push(START_CODE, sps);
+      if (pps) parts.push(START_CODE, pps);
+    }
+    for (const n of nalus) parts.push(START_CODE, n);
+    const data = concatBytes(parts);
+
+    const clockRate = this.config?.clockRate ?? 90000;
+    const chunk = new EncodedVideoChunk({
+      type: isKey ? 'key' : 'delta',
+      timestamp: Math.round((ts * 1_000_000) / clockRate),
+      data,
     });
+    this.frames++;
+    try {
+      this.decoder.decode(chunk);
+    } catch (e) {
+      // 디코더 상태 이상 → 재설정 후 다음 키프레임에서 재시작
+      this.lastError = `디코딩 실패: ${String(e)}`;
+      this.configuredReset();
+      this.drops++;
+    }
+  }
+
+  private configuredReset() {
+    try {
+      this.decoder?.close();
+    } catch { /* 무시 */ }
+    this.decoder = null;
+    this.sawKeyframe = false;
+    this.candidateIdx = 0;
   }
 
   // collectParamSet은 스트림에서 SPS/PPS/VPS를 수집한다.
@@ -302,7 +373,6 @@ class Session {
   // depacketize는 RTP 페이로드를 NALU 배열로 변환한다.
   // FU 조각이 진행 중이면 null을 반환한다.
   private fuBuf: Uint8Array | null = null;
-  private fuCodec: 'h264' | 'h265' = 'h264';
 
   private depacketize(codec: 'h264' | 'h265', payload: Uint8Array): Uint8Array[] | null {
     if (payload.length === 0) return [];
@@ -331,7 +401,6 @@ class Session {
         const fuType = payload[1] & 0x1f;
         const nalu = new Uint8Array((payload[0] & 0xe0) | fuType);
         if (s) {
-          this.fuCodec = codec;
           this.fuBuf = concatBytes([nalu, payload.subarray(2)]);
           return null;
         }
@@ -372,7 +441,6 @@ class Session {
       if (s) {
         // NALU 헤더 재구성: [첫 바이트의 상위 비트 유지, (fuType<<1)|layerId 하위]
         const hdr = new Uint8Array([(payload[0] & 0x81) | (fuType << 1), payload[1]]);
-        this.fuCodec = codec;
         this.fuBuf = concatBytes([hdr, payload.subarray(3)]);
         return null;
       }
@@ -410,11 +478,11 @@ class Session {
       this.decoder?.close();
     } catch { /* 무시 */ }
     this.decoder = null;
-    this.configured = false;
     this.sawKeyframe = false;
     this.queue = [];
     this.frameNalus = [];
     this.fuBuf = null;
+    this.heldKey = null;
   }
 }
 
@@ -452,7 +520,8 @@ ctx.onmessage = (ev: MessageEvent) => {
         vps: b64ToBytes(msg.vps ?? ''),
         clockRate: msg.clockRate ?? 90000,
       };
-      void s.tryConfigure();
+      // 파라미터 셋이 왔다면 즉시 디코더 준비 (동기)
+      s.prepareDecoder();
       break;
     }
     case 'packet': {
@@ -466,20 +535,17 @@ ctx.onmessage = (ev: MessageEvent) => {
       });
       break;
     }
-    case 'detach': {
-      const s = sessions.get(msg.cameraId);
-      if (s) {
-        s.dispose();
-        sessions.delete(msg.cameraId);
-      }
-      break;
-    }
+    case 'detach':
     case 'reset': {
       const s = sessions.get(msg.cameraId);
       if (s) {
         const camId = s.cameraId;
         s.dispose();
-        sessions.set(camId, new Session(camId));
+        if (msg.type === 'detach') {
+          sessions.delete(camId);
+        } else {
+          sessions.set(camId, new Session(camId));
+        }
       }
       break;
     }

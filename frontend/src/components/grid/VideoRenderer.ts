@@ -23,12 +23,17 @@ void main() {
 }`;
 
 // VideoRenderer는 캔버스 하나를 소유하며 VideoFrame을 그린다.
+// VideoFrame 직접 업로드가 실패하는 WebView에서는 2D 캔버스 우회 경로로 전환한다.
 export class VideoRenderer {
   private gl: WebGL2RenderingContext | null = null;
   private program: WebGLProgram | null = null;
   private vao: WebGLVertexArrayObject | null = null;
   private tex: WebGLTexture | null = null;
   private canvas: HTMLCanvasElement;
+  private directUploadFailed = false;
+  private fallbackCanvas: OffscreenCanvas | HTMLCanvasElement | null = null;
+  private fallbackCtx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null = null;
+  private lastErrorLogged = '';
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -121,15 +126,27 @@ export class VideoRenderer {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.tex);
 
-    try {
-      // VideoFrame을 RGBA 텍스처로 업로드 (GPU 변환)
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, frame);
-    } catch {
-      // 일부 WebView에서 VideoFrame 업로드 실패 시 1회만 에러를 남긴다
-      if (!(this.canvas as unknown as {__texErr?: boolean}).__texErr) {
-        (this.canvas as unknown as {__texErr?: boolean}).__texErr = true;
-        console.error('VideoFrame 텍스처 업로드 실패');
+    // 1차: VideoFrame을 RGBA 텍스처로 직접 업로드 (GPU 변환)
+    // 2차: 실패 시 2D 캔버스 우회 (drawImage 후 캔버스를 업로드)
+    let source: TexImageSource = frame;
+    if (this.directUploadFailed) {
+      const fc = this.ensureFallbackCanvas(frame.displayWidth, frame.displayHeight);
+      if (!fc || !this.fallbackCtx) {
+        this.logOnce('2D 폴백 캔버스를 사용할 수 없습니다');
+        return;
       }
+      this.fallbackCtx.drawImage(frame, 0, 0);
+      source = fc;
+    }
+    try {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    } catch (e) {
+      if (!this.directUploadFailed) {
+        this.directUploadFailed = true;
+        this.logOnce(`VideoFrame 직접 업로드 실패, 2D 캔버스 우회로 전환: ${String(e)}`);
+        return; // 이 프레임은 건너뛰고 다음 프레임부터 우회 경로 사용
+      }
+      this.logOnce(`텍스처 업로드 실패: ${String(e)}`);
       return;
     }
 
@@ -142,6 +159,37 @@ export class VideoRenderer {
     gl.viewport((pw - vw) / 2, (ph - vh) / 2, vw, vh);
 
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  // ensureFallbackCanvas는 2D 우회용 캔버스를 준비한다.
+  private ensureFallbackCanvas(w: number, h: number): OffscreenCanvas | HTMLCanvasElement | null {
+    if (!this.fallbackCanvas) {
+      try {
+        this.fallbackCanvas = new OffscreenCanvas(w || 640, h || 360);
+        this.fallbackCtx = (this.fallbackCanvas as OffscreenCanvas).getContext('2d');
+      } catch {
+        this.fallbackCanvas = null;
+      }
+      if (!this.fallbackCtx && typeof document !== 'undefined') {
+        const c = document.createElement('canvas');
+        c.width = w || 640;
+        c.height = h || 360;
+        this.fallbackCanvas = c;
+        this.fallbackCtx = c.getContext('2d');
+      }
+    } else if (this.fallbackCanvas.width !== w || this.fallbackCanvas.height !== h) {
+      this.fallbackCanvas.width = w;
+      this.fallbackCanvas.height = h;
+    }
+    return this.fallbackCanvas;
+  }
+
+  // logOnce는 같은 오류를 한 번만 기록한다.
+  private logOnce(msg: string) {
+    if (this.lastErrorLogged !== msg) {
+      this.lastErrorLogged = msg;
+      console.error('[VideoRenderer]', msg);
+    }
   }
 
   dispose() {
