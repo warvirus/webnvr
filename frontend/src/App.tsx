@@ -1,28 +1,43 @@
-// 백엔드 서비스 상태를 표시하는 임시 랜딩 컴포넌트 (Phase 3에서 카메라 관리 UI로 교체)
-import {ListCameras} from "../wailsjs/go/api/CameraService";
-import {useState} from 'react';
-import './App.css';
+// webnvr 앱 루트 — 레일/헤더/페이지/상태바 조립
+import React, {useEffect} from 'react';
+import {Sidebar} from './components/layout/Sidebar';
+import {Toolbar} from './components/layout/Toolbar';
+import {StatusBar} from './components/layout/StatusBar';
+import {CameraManagementPage} from './pages/CameraManagementPage';
+import {MonitoringPage} from './pages/MonitoringPage';
+import {useUIStore} from './store/uiStore';
 
-function App() {
-    const [status, setStatus] = useState('');
+export default function App() {
+  const currentPage = useUIStore(s => s.currentPage);
+  const toasts = useUIStore(s => s.toasts);
+  const dismissToast = useUIStore(s => s.dismissToast);
 
-    async function checkBackend() {
-        try {
-            const cams = await ListCameras();
-            setStatus(`백엔드 연결 정상 — 등록된 카메라 ${cams.length}대`);
-        } catch (e) {
-            setStatus(`백엔드 호출 실패: ${e}`);
-        }
+  // ESC로 토스트 닫기 등 전역 키 처리
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape' && toasts.length > 0) {
+        dismissToast(toasts[toasts.length - 1].id);
+      }
     }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [toasts, dismissToast]);
 
-    return (
-        <div id="App">
-            <h1>webnvr</h1>
-            <p>CCTV 관제 시스템 (개발 중)</p>
-            <button onClick={checkBackend}>백엔드 연결 테스트</button>
-            <div className="result">{status}</div>
-        </div>
-    );
+  return (
+    <div className="shell">
+      <Sidebar/>
+      <Toolbar/>
+      <main className="main">
+        {currentPage === 'monitoring' ? <MonitoringPage/> : <CameraManagementPage/>}
+      </main>
+      <StatusBar/>
+      <div className="toasts" aria-live="polite">
+        {toasts.map(t => (
+          <div key={t.id} className={`toast ${t.kind}`} onClick={() => dismissToast(t.id)}>
+            {t.text}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
-
-export default App;
