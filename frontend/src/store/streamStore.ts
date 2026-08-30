@@ -40,7 +40,8 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
             vps: msg.vps ?? '',
             clockRate: msg.clockRate ?? 90000,
           });
-          set(s => ({states: {...s.states, [cameraId]: 'streaming'}}));
+          // 화면 표시는 첫 프레임 디코딩('decoded') 시점으로 전환 — GOP 대기 중 "연결 중" 유지
+          set(s => ({states: {...s.states, [cameraId]: 'starting'}}));
           break;
         }
         case 'rtp_packet': {
@@ -79,6 +80,10 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
     const onWorkerMsg = (ev: MessageEvent) => {
       const msg = ev.data;
       switch (msg.type) {
+        case 'decoded':
+          // 첫 프레임 디코딩 성공 → 오류 상태 해제 및 스트리밍 확정
+          set(s => ({states: {...s.states, [msg.cameraId]: 'streaming'}, lastError: null}));
+          break;
         case 'stats':
           set(s => ({stats: {...s.stats, [msg.cameraId]: msg.stats}}));
           break;

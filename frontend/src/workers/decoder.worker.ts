@@ -26,7 +26,6 @@ interface CodecConfig {
 const TICK_MS = 30;          // 큐 처리 주기 (지터 스무딩)
 const MAX_QUEUE = 150;       // 큐 상한 초과 시 가장 오래된 패킷 드롭
 const STATS_MS = 1000;
-const WATCHDOG_PACKETS = 60; // 이 만큼 패킷이 왔는데 프레임이 없으면 진단 에러 발행
 
 const START_CODE = new Uint8Array([0, 0, 0, 1]);
 
@@ -119,6 +118,7 @@ class Session {
   frames = 0;
   drops = 0;
   diagSent = false;
+  firstPacketMs = 0;
   lastError = '';
 
   // 통계
@@ -242,15 +242,28 @@ class Session {
     this.watchdog();
   }
 
-  // watchdog는 패킷은 오는데 프레임이 안 나오는 상태를 UI로 알린다.
+  // watchdog는 장기간 프레임이 없는 경우에만 오류를 발행한다.
+  // 실제 카메라는 참여 시점부터 첫 키프레임까지 GOP(2~10초)를 기다려야 하므로
+  // 패킷 수 기준 판정은 오판을 유발한다 — 시간 기준으로 판정한다.
   private watchdog() {
-    if (!this.diagSent && this.packets > WATCHDOG_PACKETS && this.frames === 0) {
-      const ready = this.ensureDecoder();
+    if (this.diagSent || this.frames > 0) return;
+    if (this.firstPacketMs === 0) this.firstPacketMs = performance.now();
+    const elapsed = performance.now() - this.firstPacketMs;
+    if (this.packets < 10) return;
+
+    if (this.sawKeyframe && elapsed > 8_000) {
       this.diagSent = true;
       ctx.postMessage({
         type: 'error',
         cameraId: this.cameraId,
-        message: `패킷 ${this.packets}개 수신 중이나 디코딩 결과가 없습니다 (디코더 준비: ${ready ? '완료' : '미완료'}, 키프레임: ${this.sawKeyframe ? '수신' : '대기'})`,
+        message: '키프레임 이후에도 8초간 프레임이 디코딩되지 않았습니다',
+      });
+    } else if (!this.sawKeyframe && elapsed > 20_000) {
+      this.diagSent = true;
+      ctx.postMessage({
+        type: 'error',
+        cameraId: this.cameraId,
+        message: '20초간 키프레임을 수신하지 못했습니다 — 카메라의 GOP(키 프레임 간격) 설정을 확인하세요',
       });
     }
   }
@@ -338,6 +351,10 @@ class Session {
       data,
     });
     this.frames++;
+    if (this.frames === 1) {
+      // 첫 프레임 디코딩 성공 → UI의 오류/대기 상태를 해제한다
+      ctx.postMessage({type: 'decoded', cameraId: this.cameraId});
+    }
     try {
       this.decoder.decode(chunk);
     } catch (e) {

@@ -103,7 +103,9 @@ export function CameraTile({camera, channel, state, stats, selected, active, onS
             </button>
           </div>
         )}
-        {active && state === 'starting' && <div className="tile-idle"><span>카메라에 연결하는 중…</span></div>}
+        {active && state === 'starting' && (
+          <div className="tile-idle"><span>카메라에 연결하는 중… (첫 키프레임 대기)</span></div>
+        )}
         {glFailed && <div className="tile-idle">WebGL을 사용할 수 없습니다</div>}
         {active && state === 'error' && (
           <div className="tile-idle tile-error-msg">
