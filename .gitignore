@@ -7,3 +7,37 @@ frontend/dist
 
 # 런타임 생성 설정
 /config/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Trashes
+.Spotlight-V100
+.TemporaryItems
+.fseventsd
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+*.dmp
+.~
+
+# 공통 (에디터/쉘)
+.idea/
+.vscode/*.user
+
+# AI관련
+checklist.md
+context-notes.md
+MEMORY.md
