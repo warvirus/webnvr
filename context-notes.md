@@ -70,6 +70,20 @@
 
 ---
 
+## 2026-08-31 — Phase 2.1~2.3 작업 중 결정/발견
+
+### D11. gortsplib/v4 버전 및 디페이로더 결정
+- **상황**: pion/rtsp 모듈은 fetch 불가(아카이브). gortsplib v4.16.3 릴리스는 소스가 빠진 불완전 스텁(1개 파일).
+- **결정**: `gortsplib/v4 v4.16.2` 사용. H.264/H.265 RTP 디페이로딩(RFC 6184/7798, FU-A 재조립 포함)은 gortsplib 내장 `pkg/format/rtph264|rtph265` 디코더로 수행 — 별도 구현 생략.
+- **영향**: Phase 2.2는 라이브러리 활용으로 충족. SPS 파싱(해상도)은 mediacommon/v2 `h264.SPS` 사용. H.265 SPS 해상도 파싱은 미구현(필요 시 확장).
+
+### D12. 스트림 이벤트 설계
+- **결정**: Hub 구독자 채널은 `Event` 인터페이스(StartedEvent/PacketEvent/StoppedEvent)를 순서대로 전달. 패킷은 RTP payload 원본을 전달하고 SPS/PPS/SSRC/clockRate 등은 StartedEvent에서 제공. CameraID는 Hub가 발행 시 부여.
+- **이유**: WS 계층에서 stream_started → rtp_packet → stream_stopped 순서 보장이 자연스러움. SDP에 파라미터 셋이 없는 카메라는 스트림에서 SPS/PPS를 수집한 뒤 StartedEvent 발행.
+- **영향**: 백프레셔 정책은 "느린 구독자 프레임 드롭"(30 프레임 버퍼, 비동기 publish). RTMP는 인터페이스만 필요하면 추가(현재 미포함, D4 유지).
+
+---
+
 ## 작업 중 발견 사항
 
 (작업 진행 중 발견한 이슈와 해결 방법을 여기에 추가)
