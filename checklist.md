@@ -33,11 +33,11 @@
   - [x] profiles.go, stream_uri.go, ptz.go
   - [x] SOAP 목업 서버 단위 테스트 통과
   - [x] semantic commit: "ONVIF 클라이언트 모듈 추가"
-- [ ] 1.5 internal/api/
-  - [ ] camera.go — CameraService (doc §5.1 계약 전체)
-  - [ ] events.go — 프론트엔드 이벤트 emit
-  - [ ] 컴파일 + wails 바인딩 생성 확인
-  - [ ] semantic commit: "Camera API 바인딩 추가"
+- [x] 1.5 internal/api/
+  - [x] camera.go — CameraService (doc §5.1 계약 전체)
+  - [x] events.go — Phase 2 (WS Hub 필요 시점)로 연기 결정
+  - [x] 컴파일 + wails 바인딩 생성 확인 (frontend/wailsjs/go/api/CameraService.d.ts)
+  - [x] semantic commit: "Camera API 바인딩 추가"
 
 ## Phase 2: 스트림 코어 + WebSocket
 

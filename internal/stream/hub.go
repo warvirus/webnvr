@@ -1,0 +1,220 @@
+// 스트림 라이프사이클과 구독자 관리, 백프레셔(느린 구독자 프레임 드롭)를 담당한다.
+package stream
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"sync"
+)
+
+// subscriberBuf는 구독자 채널 버퍼 크기(프레임)다.
+const subscriberBuf = 30
+
+// CameraSource는 카메라 ID로 스트림 URL과 전송 방식을 제공한다.
+type CameraSource interface {
+	// StreamURL은 카메라의 RTSP URL을 반환한다. (예: rtsp://user:pass@host:554/stream)
+	StreamURL(cameraID string) (rawURL string, transport string, err error)
+}
+
+// subscriber는 스트림 구독자 한 명이다.
+type subscriber struct {
+	ch    chan Event
+	drops uint64
+}
+
+// activeStream은 실행 중인 스트림 하나다.
+type activeStream struct {
+	cancel context.CancelFunc
+	subs   map[*subscriber]struct{}
+	info   Info
+}
+
+// Hub는 카메라별 스트림을 관리하고 구독자에게 이벤트를 배포한다.
+type Hub struct {
+	src  CameraSource
+	dial Dialer
+
+	mu      sync.Mutex
+	streams map[string]*activeStream
+}
+
+// NewHub는 카메라 소스와 연결 함수로 허브를 생성한다.
+func NewHub(src CameraSource, dial Dialer) *Hub {
+	if dial == nil {
+		dial = DialRTSP
+	}
+	return &Hub{src: src, dial: dial, streams: map[string]*activeStream{}}
+}
+
+// Start는 카메라 스트림을 시작한다. 이미 실행 중이면 아무 작업도 하지 않는다.
+func (h *Hub) Start(cameraID string) error {
+	h.mu.Lock()
+	if _, ok := h.streams[cameraID]; ok {
+		h.mu.Unlock()
+		return nil
+	}
+	// 다른 Start가 끼어들지 않도록 자리를 먼저 확보한다.
+	e := &activeStream{subs: map[*subscriber]struct{}{}}
+	h.streams[cameraID] = e
+	h.mu.Unlock()
+
+	rawURL, transport, err := h.src.StreamURL(cameraID)
+	if err != nil {
+		h.mu.Lock()
+		delete(h.streams, cameraID)
+		h.mu.Unlock()
+		return fmt.Errorf("스트림 URL 조회 실패: %w", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	e.cancel = cancel
+
+	go func() {
+		dialErr := h.dial(ctx, rawURL, transport,
+			func(info Info) {
+				info.CameraID = cameraID
+				h.setInfo(cameraID, info)
+				h.publish(cameraID, StartedEvent{Info: info})
+			},
+			func(pkt Packet) {
+				pkt.CameraID = cameraID
+				h.publish(cameraID, PacketEvent{Packet: pkt})
+			},
+		)
+		if dialErr != nil && ctx.Err() == nil {
+			slog.Warn("RTSP 스트림 종료", "camera", cameraID, "err", dialErr)
+		}
+		h.close(cameraID, ctx.Err() == nil)
+	}()
+
+	return nil
+}
+
+// Stop은 카메라 스트림을 중지한다. 실행 중이 아니면 오류를 반환한다.
+func (h *Hub) Stop(cameraID string) error {
+	h.mu.Lock()
+	e, ok := h.streams[cameraID]
+	if ok {
+		delete(h.streams, cameraID)
+	}
+	h.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("실행 중인 스트림이 없음: %s", cameraID)
+	}
+	e.cancel()
+	return nil
+}
+
+// StopAll은 모든 스트림을 중지한다.
+func (h *Hub) StopAll() error {
+	h.mu.Lock()
+	ids := make([]string, 0, len(h.streams))
+	for id := range h.streams {
+		ids = append(ids, id)
+	}
+	h.mu.Unlock()
+	for _, id := range ids {
+		if err := h.Stop(id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Subscribe는 구독자 채널과 구독 해제 함수를 반환한다.
+// 스트림이 실행 중이어야 하며, 채널로 Started/Packet/Stopped 이벤트가 순서대로 전달된다.
+func (h *Hub) Subscribe(cameraID string) (<-chan Event, func(), error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	e, ok := h.streams[cameraID]
+	if !ok {
+		return nil, nil, fmt.Errorf("실행 중인 스트림이 없음: %s", cameraID)
+	}
+	s := &subscriber{ch: make(chan Event, subscriberBuf)}
+	e.subs[s] = struct{}{}
+	cancel := func() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		if cur, ok := h.streams[cameraID]; ok {
+			delete(cur.subs, s)
+		}
+	}
+	return s.ch, cancel, nil
+}
+
+// Info는 실행 중인 스트림의 코덱 메타데이터를 반환한다.
+func (h *Hub) Info(cameraID string) (Info, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	e, ok := h.streams[cameraID]
+	if !ok {
+		return Info{}, false
+	}
+	return e.info, true
+}
+
+// Running은 실행 중인 스트림 ID 목록을 반환한다.
+func (h *Hub) Running() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]string, 0, len(h.streams))
+	for id := range h.streams {
+		out = append(out, id)
+	}
+	return out
+}
+
+// setInfo는 스트림 메타데이터를 저장한다.
+func (h *Hub) setInfo(cameraID string, info Info) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if e, ok := h.streams[cameraID]; ok {
+		e.info = info
+	}
+}
+
+// publish는 모든 구독자에게 이벤트를 비동기로 전달한다.
+// 채널이 가득 찬 느린 구독자의 이벤트는 드롭한다(백프레셔 정책).
+func (h *Hub) publish(cameraID string, ev Event) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	e, ok := h.streams[cameraID]
+	if !ok {
+		return
+	}
+	for s := range e.subs {
+		select {
+		case s.ch <- ev:
+		default:
+			s.drops++
+		}
+	}
+}
+
+// close는 스트림을 정리하고 구독자에게 종료 이벤트를 전달한다.
+func (h *Hub) close(cameraID string, abnormal bool) {
+	h.mu.Lock()
+	e, ok := h.streams[cameraID]
+	if ok {
+		delete(h.streams, cameraID)
+	}
+	h.mu.Unlock()
+	if !ok {
+		return
+	}
+	if e.cancel != nil {
+		e.cancel()
+	}
+	reason := "정상 종료"
+	if abnormal {
+		reason = "연결 끊김"
+	}
+	for s := range e.subs {
+		select {
+		case s.ch <- StoppedEvent{Reason: reason}:
+		default:
+		}
+		close(s.ch)
+	}
+}

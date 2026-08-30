@@ -1,0 +1,329 @@
+// RTSP 클라이언트와 허브의 단위/통합 테스트
+package stream
+
+import (
+	"context"
+	"net"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/bluenviron/gortsplib/v4"
+	"github.com/bluenviron/gortsplib/v4/pkg/base"
+	"github.com/bluenviron/gortsplib/v4/pkg/description"
+	"github.com/bluenviron/gortsplib/v4/pkg/format"
+)
+
+// testCameraSource는 카메라 ID를 고정 URL로 매핑하는 테스트용 소스다.
+type testCameraSource struct{ urls map[string]string }
+
+func (s testCameraSource) StreamURL(cameraID string) (string, string, error) {
+	u, ok := s.urls[cameraID]
+	if !ok {
+		return "", "", context.Canceled
+	}
+	return u, "tcp", nil
+}
+
+// fakeDialer는 실제 네트워크 없이 Info와 N개의 패킷을 발생시킨다.
+func fakeDialer(packets int) Dialer {
+	return func(ctx context.Context, rawURL, transport string, onInfo func(Info), onPacket func(Packet)) error {
+		onInfo(Info{Codec: CodecH264, SPS: []byte{0x67}, PPS: []byte{0x68}, ClockRate: 90000})
+		for i := 0; i < packets; i++ {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			onPacket(Packet{Codec: CodecH264, Sequence: uint16(i), Timestamp: uint32(i), Payload: []byte{1, 2, 3}})
+			time.Sleep(1 * time.Millisecond)
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+}
+
+// collectEvents는 구독 채널에서 이벤트를 수집한다. stop이 true를 반환하면 즉시 중단한다.
+func collectEvents(ch <-chan Event, timeout time.Duration, stop func(evts []Event) bool) []Event {
+	var out []Event
+	deadline := time.After(timeout)
+	for {
+		select {
+		case ev, ok := <-ch:
+			if !ok {
+				return out
+			}
+			out = append(out, ev)
+			if stop != nil && stop(out) {
+				return out
+			}
+		case <-deadline:
+			return out
+		}
+	}
+}
+
+// TestHubStartSubscribeStop는 시작→구독→패킷→정지 흐름을 확인한다.
+func TestHubStartSubscribeStop(t *testing.T) {
+	hub := NewHub(testCameraSource{urls: map[string]string{"cam-1": "rtsp://127.0.0.1:1/stream"}}, fakeDialer(5))
+
+	if err := hub.Start("cam-1"); err != nil {
+		t.Fatalf("Start() err = %v", err)
+	}
+	if err := hub.Start("cam-1"); err != nil {
+		t.Fatalf("재 Start() err = %v", err)
+	}
+
+	ch, cancel, err := hub.Subscribe("cam-1")
+	if err != nil {
+		t.Fatalf("Subscribe() err = %v", err)
+	}
+	defer cancel()
+
+	evts := collectEvents(ch, 3*time.Second, func(evts []Event) bool {
+		return len(evts) >= 6 // started + 5 packets
+	})
+	if len(evts) < 6 {
+		t.Fatalf("이벤트 부족: %d", len(evts))
+	}
+	if _, ok := evts[0].(StartedEvent); !ok {
+		t.Errorf("첫 이벤트가 StartedEvent가 아님: %T", evts[0])
+	}
+	for i := 1; i <= 5; i++ {
+		pe, ok := evts[i].(PacketEvent)
+		if !ok {
+			t.Fatalf("%d번째 이벤트가 PacketEvent가 아님: %T", i, evts[i])
+		}
+		if pe.Packet.CameraID != "cam-1" {
+			t.Errorf("CameraID가 부여되지 않음: %+v", pe.Packet)
+		}
+	}
+
+	if info, ok := hub.Info("cam-1"); !ok || info.SPS == nil {
+		t.Errorf("Info 조회 실패: %+v %v", info, ok)
+	}
+	if len(hub.Running()) != 1 {
+		t.Errorf("Running() = %v", hub.Running())
+	}
+
+	if err := hub.Stop("cam-1"); err != nil {
+		t.Fatalf("Stop() err = %v", err)
+	}
+	<-time.After(100 * time.Millisecond)
+	if _, ok := hub.Info("cam-1"); ok {
+		t.Error("정지 후에도 스트림이 실행 중으로 표시됨")
+	}
+}
+
+// TestHubNotRunning는 실행되지 않은 스트림에 대한 오류를 확인한다.
+func TestHubNotRunning(t *testing.T) {
+	hub := NewHub(testCameraSource{urls: map[string]string{}}, nil)
+	if _, _, err := hub.Subscribe("nope"); err == nil {
+		t.Error("없는 스트림 구독이 성공함")
+	}
+	if err := hub.Stop("nope"); err == nil {
+		t.Error("없는 스트림 정지가 성공함")
+	}
+	if err := hub.Start("nope"); err == nil {
+		t.Error("URL 없는 카메라 시작이 성공함")
+	}
+}
+
+// TestHubBackpressure는 느린 구독자의 이벤트가 드롭됨을 확인한다.
+func TestHubBackpressure(t *testing.T) {
+	hub := NewHub(testCameraSource{urls: map[string]string{"cam-1": "rtsp://127.0.0.1:1/stream"}}, fakeDialer(200))
+
+	if err := hub.Start("cam-1"); err != nil {
+		t.Fatal(err)
+	}
+	ch, cancel, err := hub.Subscribe("cam-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+
+	// 구독자가 소비하지 않는 상태로 200 패킷 생산을 기다린다.
+	time.Sleep(500 * time.Millisecond)
+
+	// 채널 버퍼(30)를 초과한 패킷은 드롭되었어야 한다.
+	drained := 0
+drain:
+	for {
+		select {
+		case <-ch:
+			drained++
+		default:
+			break drain
+		}
+	}
+	if drained > subscriberBuf+5 {
+		t.Errorf("버퍼 초과 이벤트가 드롭되지 않음: drained=%d", drained)
+	}
+}
+
+// TestHubStopAll는 전체 정지를 확인한다.
+func TestHubStopAll(t *testing.T) {
+	hub := NewHub(testCameraSource{urls: map[string]string{
+		"cam-1": "rtsp://a", "cam-2": "rtsp://b",
+	}}, fakeDialer(100))
+	_ = hub.Start("cam-1")
+	_ = hub.Start("cam-2")
+	if err := hub.StopAll(); err != nil {
+		t.Fatalf("StopAll() err = %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if len(hub.Running()) != 0 {
+		t.Errorf("StopAll 후 실행 중: %v", hub.Running())
+	}
+}
+
+// sampleSPS/PPS는 유효한 H.264 파라미터 셋 (352x288, mediacommon 테스트 벡터)이다.
+var sampleSPS = []byte{
+	0x67, 0x64, 0x00, 0x0c, 0xac, 0x3b, 0x50, 0xb0,
+	0x4b, 0x42, 0x00, 0x00, 0x03, 0x00, 0x02, 0x00,
+	0x00, 0x03, 0x00, 0x3d, 0x08,
+}
+var samplePPS = []byte{0x68, 0xeb, 0xec, 0xb2, 0x2c}
+
+// TestDimensionsOf는 SPS 해상도 파싱을 확인한다.
+func TestDimensionsOf(t *testing.T) {
+	w, h := dimensionsOf(CodecH264, sampleSPS)
+	if w != 352 || h != 288 {
+		t.Errorf("dimensionsOf() = %dx%d, want 352x288", w, h)
+	}
+	if w, h := dimensionsOf(CodecH264, nil); w != 0 || h != 0 {
+		t.Errorf("nil SPS 처리 실패: %dx%d", w, h)
+	}
+}
+
+// testRTSPServer는 실제 RTSP 서버를 흉내 내는 통합 테스트 서버다.
+type testRTSPServer struct {
+	srv    *gortsplib.Server
+	stream *gortsplib.ServerStream
+	medi   *description.Media
+	h264f  *format.H264
+}
+
+func newTestRTSPServer(t *testing.T) *testRTSPServer {
+	t.Helper()
+	ts := &testRTSPServer{}
+
+	ts.h264f = &format.H264{
+		PayloadTyp:        96,
+		SPS:               sampleSPS,
+		PPS:               samplePPS,
+		PacketizationMode: 1,
+	}
+	ts.medi = &description.Media{
+		Type:    description.MediaTypeVideo,
+		Formats: []format.Format{ts.h264f},
+	}
+
+	ts.srv = &gortsplib.Server{
+		Handler:     ts,
+		RTSPAddress: freePort(t),
+	}
+	if err := ts.srv.Start(); err != nil {
+		t.Fatalf("RTSP 서버 시작 실패: %v", err)
+	}
+	// 서버 초기화 후 스트림을 생성해야 한다.
+	ts.stream = gortsplib.NewServerStream(ts.srv, &description.Session{
+		BaseURL: nil,
+		Medias:  []*description.Media{ts.medi},
+	})
+	t.Cleanup(func() { ts.srv.Close() })
+	return ts
+}
+
+func (ts *testRTSPServer) url() string { return "rtsp://" + ts.srv.RTSPAddress + "/stream" }
+
+func (ts *testRTSPServer) OnConnOpen(*gortsplib.ServerHandlerOnConnOpenCtx)         {}
+func (ts *testRTSPServer) OnConnClose(*gortsplib.ServerHandlerOnConnCloseCtx)       {}
+func (ts *testRTSPServer) OnSessionOpen(*gortsplib.ServerHandlerOnSessionOpenCtx)   {}
+func (ts *testRTSPServer) OnSessionClose(*gortsplib.ServerHandlerOnSessionCloseCtx) {}
+
+func (ts *testRTSPServer) OnDescribe(*gortsplib.ServerHandlerOnDescribeCtx) (*base.Response, *gortsplib.ServerStream, error) {
+	return &base.Response{StatusCode: base.StatusOK}, ts.stream, nil
+}
+
+func (ts *testRTSPServer) OnSetup(*gortsplib.ServerHandlerOnSetupCtx) (*base.Response, *gortsplib.ServerStream, error) {
+	return &base.Response{StatusCode: base.StatusOK}, ts.stream, nil
+}
+
+func (ts *testRTSPServer) OnPlay(*gortsplib.ServerHandlerOnPlayCtx) (*base.Response, error) {
+	// PLAY 후 IDR/슬라이스 NALU 10개를 전송한다.
+	go func() {
+		enc, err := ts.h264f.CreateEncoder()
+		if err != nil {
+			return
+		}
+		for i := 0; i < 10; i++ {
+			naluType := byte(5) // IDR
+			if i%2 == 1 {
+				naluType = 1 // non-IDR
+			}
+			nalu := []byte{naluType, 0x01, 0x02, byte(i)}
+			pkts, err := enc.Encode([][]byte{nalu})
+			if err != nil || len(pkts) == 0 {
+				continue
+			}
+			_ = ts.stream.WritePacketRTP(ts.medi, pkts[0])
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+	return &base.Response{StatusCode: base.StatusOK}, nil
+}
+
+// freePort는 사용 가능한 로컬 포트를 할당한다.
+func freePort(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	return l.Addr().String()
+}
+
+// TestDialRTSPIntegration은 로컬 RTSP 서버와의 실제 연결 흐름을 확인한다.
+func TestDialRTSPIntegration(t *testing.T) {
+	ts := newTestRTSPServer(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var (
+		mu       sync.Mutex
+		gotInfo  bool
+		pktCount int
+	)
+	err := DialRTSP(ctx, ts.url(), "tcp",
+		func(info Info) {
+			mu.Lock()
+			defer mu.Unlock()
+			gotInfo = true
+			if info.Codec != CodecH264 || info.SPS == nil || info.PPS == nil {
+				t.Errorf("Info 불일치: %+v", info)
+			}
+			if info.Width != 352 || info.Height != 288 {
+				t.Errorf("해상도 불일치: %dx%d", info.Width, info.Height)
+			}
+		},
+		func(Packet) {
+			mu.Lock()
+			defer mu.Unlock()
+			pktCount++
+		},
+	)
+	mu.Lock()
+	defer mu.Unlock()
+	if err != nil && ctx.Err() == nil {
+		t.Errorf("DialRTSP() err = %v", err)
+	}
+	if !gotInfo {
+		t.Error("Info 콜백이 호출되지 않음")
+	}
+	if pktCount < 10 {
+		t.Errorf("수신 패킷 수 = %d, want >= 10", pktCount)
+	}
+}

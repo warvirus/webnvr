@@ -11,6 +11,8 @@ require (
 require (
 	github.com/beevik/etree v1.1.0 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
+	github.com/bluenviron/gortsplib/v4 v4.16.2 // indirect
+	github.com/bluenviron/mediacommon/v2 v2.4.1 // indirect
 	github.com/elgs/gostrgen v0.0.0-20161222160715-9d61ae07eeae // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
@@ -26,6 +28,13 @@ require (
 	github.com/leaanthony/u v1.1.1 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/pion/logging v0.2.3 // indirect
+	github.com/pion/randutil v0.1.0 // indirect
+	github.com/pion/rtcp v1.2.15 // indirect
+	github.com/pion/rtp v1.8.21 // indirect
+	github.com/pion/sdp/v3 v3.0.15 // indirect
+	github.com/pion/srtp/v3 v3.0.6 // indirect
+	github.com/pion/transport/v3 v3.0.7 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
@@ -36,10 +45,10 @@ require (
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/wailsapp/go-webview2 v1.0.19 // indirect
 	github.com/wailsapp/mimetype v1.4.1 // indirect
-	golang.org/x/crypto v0.33.0 // indirect
-	golang.org/x/net v0.35.0 // indirect
-	golang.org/x/sys v0.30.0 // indirect
-	golang.org/x/text v0.22.0 // indirect
+	golang.org/x/crypto v0.41.0 // indirect
+	golang.org/x/net v0.43.0 // indirect
+	golang.org/x/sys v0.35.0 // indirect
+	golang.org/x/text v0.28.0 // indirect
 )
 
 // replace github.com/wailsapp/wails/v2 v2.10.1 => /Users/jason/go/pkg/mod

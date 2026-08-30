@@ -58,7 +58,9 @@
 | 1.2 internal/config/ (loader, watcher, encryption, validator) | ✅ 완료 | 2026-08-30 23:58 (commit ddd83da, 테스트+race 통과) |
 | 1.3 internal/camera/ (types, store, manager) | ✅ 완료 | 2026-08-31 00:05 (commit 9104edb, 테스트+race 통과) |
 | 1.4 internal/onvif/ (client, discovery, profiles, stream_uri, ptz) | ✅ 완료 | 2026-08-31 00:50 (commit 2e43425, SOAP 목업 테스트 통과) |
-| 1.5 internal/api/ CameraService 바인딩 | ⏳ 대기 | — |
+| 1.5 internal/api/ CameraService 바인딩 | ✅ 완료 | 2026-08-31 00:57 (commit 77d9f3f, wails 바인딩 생성 확인) |
+
+### **Phase 1 완료** (2026-08-31 00:57)
 
 ### Phase 2: 스트림 코어 + WebSocket — 대기
 | 작업 | 상태 | 완료 시각 |
