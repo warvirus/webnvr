@@ -120,6 +120,12 @@ type TestDirectStreamResponse struct {
 	Error string `json:"error"`
 }
 
+// PresetDTO는 카메라에 저장된 PTZ 프리셋이다.
+type PresetDTO struct {
+	Token string `json:"token"`
+	Name  string `json:"name"`
+}
+
 // CameraService는 카메라 CRUD와 ONVIF 연산을 프론트엔드에 바인딩한다.
 type CameraService struct {
 	mgr    *camera.Manager
@@ -260,6 +266,43 @@ func (s *CameraService) GetONVIFStreamURI(req GetStreamURIRequest) (string, erro
 		return "", err
 	}
 	return cli.StreamURI(context.Background(), req.ProfileToken, req.Protocol)
+}
+
+// GetCameraPresets는 저장된 자격증명으로 카메라의 PTZ 프리셋 목록을 조회한다.
+// 자격증명이 프론트엔드로 노출되지 않도록 카메라 ID만 받는다.
+func (s *CameraService) GetCameraPresets(cameraID string) ([]PresetDTO, error) {
+	cam, err := s.mgr.Get(cameraID)
+	if err != nil {
+		return nil, err
+	}
+	pass, err := s.mgr.PasswordOf(cam)
+	if err != nil {
+		return nil, fmt.Errorf("비밀번호 복호화 실패: %w", err)
+	}
+	cli, err := onvif.New(cam.XAddr, cam.Username, pass)
+	if err != nil {
+		return nil, err
+	}
+	profile := cam.ProfileToken
+	if profile == "" {
+		profiles, err := cli.Profiles(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		if len(profiles) == 0 {
+			return nil, fmt.Errorf("사용 가능한 프로필이 없음")
+		}
+		profile = profiles[0].Token
+	}
+	presets, err := cli.Presets(context.Background(), profile)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PresetDTO, 0, len(presets))
+	for _, p := range presets {
+		out = append(out, PresetDTO{Token: p.Token, Name: p.Name})
+	}
+	return out, nil
 }
 
 // TestDirectStream은 직접 스트림 URL의 형식과 도달 가능성을 검증한다.

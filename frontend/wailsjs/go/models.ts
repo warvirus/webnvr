@@ -156,6 +156,20 @@ export namespace api {
 	        this.protocol = source["protocol"];
 	    }
 	}
+	export class PresetDTO {
+	    token: string;
+	    name: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PresetDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.token = source["token"];
+	        this.name = source["name"];
+	    }
+	}
 	export class ProfileDTO {
 	    token: string;
 	    name: string;

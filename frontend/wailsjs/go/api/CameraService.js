@@ -18,6 +18,10 @@ export function GetCamera(arg1) {
   return window['go']['api']['CameraService']['GetCamera'](arg1);
 }
 
+export function GetCameraPresets(arg1) {
+  return window['go']['api']['CameraService']['GetCameraPresets'](arg1);
+}
+
 export function GetONVIFProfiles(arg1) {
   return window['go']['api']['CameraService']['GetONVIFProfiles'](arg1);
 }

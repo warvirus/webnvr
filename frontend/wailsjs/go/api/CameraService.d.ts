@@ -10,6 +10,8 @@ export function DiscoverONVIFCameras():Promise<Array<api.DiscoveredCamera>>;
 
 export function GetCamera(arg1:string):Promise<api.CameraDTO>;
 
+export function GetCameraPresets(arg1:string):Promise<Array<api.PresetDTO>>;
+
 export function GetONVIFProfiles(arg1:api.GetProfilesRequest):Promise<Array<api.ProfileDTO>>;
 
 export function GetONVIFStreamURI(arg1:api.GetStreamURIRequest):Promise<string>;
