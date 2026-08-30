@@ -55,8 +55,8 @@
 | 작업 | 상태 | 완료 시각 |
 |------|------|----------|
 | 1.1 wails init 골격 → 저장소 루트 이동 → wails build 확인 | ✅ 완료 | 2026-08-30 23:52 (wails CLI 재빌드 필요했음 — 아래 트러블슈팅 참조) |
-| 1.2 internal/config/ (loader, watcher, encryption, validator) | ⏳ 대기 | — |
-| 1.3 internal/camera/ (types, store, manager) | ⏳ 대기 | — |
+| 1.2 internal/config/ (loader, watcher, encryption, validator) | ✅ 완료 | 2026-08-30 23:58 (commit ddd83da, 테스트+race 통과) |
+| 1.3 internal/camera/ (types, store, manager) | ✅ 완료 | 2026-08-31 00:05 (commit 9104edb, 테스트+race 통과) |
 | 1.4 internal/onvif/ (client, discovery, profiles, stream_uri, ptz) | ⏳ 대기 | — |
 | 1.5 internal/api/ CameraService 바인딩 | ⏳ 대기 | — |
 
