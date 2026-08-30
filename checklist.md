@@ -10,8 +10,8 @@
 
 ## Phase 1: 백엔드 기반 + Camera API
 
-- [ ] 1.1 wails init (react-ts) 골격 생성 → 임시 dir에서 생성 후 저장소 루트로 이동
-  - [ ] `wails build` 성공 확인
+- [x] 1.1 wails init (react-ts) 골격 생성 → 임시 dir에서 생성 후 저장소 루트로 이동
+  - [x] `wails build` 성공 확인 — 2026-08-30 23:52 (wails CLI 재빌드 후, context-notes D7 참조)
   - [ ] semantic commit: "wails 프로젝트 골격 추가"
 - [ ] 1.2 internal/config/
   - [ ] config.go — 타입 정의 + 기본값 (doc §8 스키마)

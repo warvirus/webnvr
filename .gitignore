@@ -1,0 +1,6 @@
+build/bin
+node_modules
+frontend/dist
+
+# go build으로 생성되는 로컬 바이너리
+/webnvr

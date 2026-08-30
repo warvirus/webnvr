@@ -40,6 +40,22 @@
 
 ---
 
+## 2026-08-30 — Phase 1.1 작업 중 결정/발견
+
+### D7. wails CLI 재빌드 (x/tools 호환성 수정)
+- **상황**: `wails build`가 x/tools v0.30.0 ↔ Go 1.27 비호환으로 실패. 자세한 내용은 MEMORY.md T1 참조.
+- **결정**: wails v2.10.1 소스를 x/tools v0.47.0으로 bump하여 재빌드 후 `GOBIN`에 설치.
+- **이유**: wails 빌드 플로우의 staticanalysis 단계가 x/tools의 `packages.Load`를 사용하며, 구버전 x/tools는 Go 1.27 go list 출력을 파싱하지 못함. wails 업그레이드(v3 등)는 프로젝트 아키텍처 문서와 불일치하므로 최소 수정 선택.
+- **영향**: 이 머신의 wails 바이너리는 커스텀 빌드임. 다른 머신 세션에서 재발 시 MEMORY.md T1 절차 참조.
+
+### D8. 레이아웃 결정: Wails v2 표준 구조 사용
+- **상황**: doc/architecture.md §4는 `backend/cmd/main.go` + `backend/go.mod` 구조를 제시하나, Wails v2는 프로젝트 루트에 main.go/wails.json/frontend/를 요구함.
+- **결정**: Wails v2 표준 레이아웃 채택 (루트 main.go, app.go, internal/{config,camera,onvif,stream,api,ws}).
+- **이유**: Wails CLI 빌드/바인딩 생성은 루트 기준으로 동작. 문서 구조는 Wails 실제 요구와 충돌.
+- **영향**: 문서의 `backend/` 프리픽스는 루트로 읽음. frontend/는 wails 템플릿 위치 유지.
+
+---
+
 ## 작업 중 발견 사항
 
 (작업 진행 중 발견한 이슈와 해결 방법을 여기에 추가)

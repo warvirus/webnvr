@@ -51,10 +51,10 @@
 | 0.1 MEMORY.md, checklist.md, context-notes.md 생성 | ✅ 완료 | 2026-08-30 23:08 |
 | 0.2 첫 커밋 (CLAUDE.md, doc/, .skills/, 3개 문서) | ⏳ 대기 | — |
 
-### Phase 1: 백엔드 기반 + Camera API — 대기
+### Phase 1: 백엔드 기반 + Camera API — 진행 중
 | 작업 | 상태 | 완료 시각 |
 |------|------|----------|
-| 1.1 wails init 골격 → 저장소 루트 이동 → wails build 확인 | ⏳ 대기 | — |
+| 1.1 wails init 골격 → 저장소 루트 이동 → wails build 확인 | ✅ 완료 | 2026-08-30 23:52 (wails CLI 재빌드 필요했음 — 아래 트러블슈팅 참조) |
 | 1.2 internal/config/ (loader, watcher, encryption, validator) | ⏳ 대기 | — |
 | 1.3 internal/camera/ (types, store, manager) | ⏳ 대기 | — |
 | 1.4 internal/onvif/ (client, discovery, profiles, stream_uri, ptz) | ⏳ 대기 | — |
@@ -72,11 +72,34 @@
 
 ---
 
+## 트러블슈팅 기록 (다른 머신/세션에서 재발 시 참조)
+
+### T1. `wails build` 실패: "internal error: package \"context\" without types was imported from \"webnvr\"" (2026-08-30 23:52 해결)
+- **증상**: `go build`는 성공하지만 `wails build`가 컴파일 전 단계에서 위 오류로 실패
+- **원인**: wails CLI v2.10.1 바이너리(2025-06 빌드, Go 1.24.3)에 포함된 `golang.org/x/tools v0.30.0`이 Go 1.27의 `go list -json=...` 출력과 비호환. wails 빌드 플로우의 `CreateEmbedDirectories → staticanalysis.GetEmbedDetails → packages.Load` 단계에서 fatal 발생 (pkg/commands/build/build.go:165)
+- **해결**: wails CLI 소스를 모듈 캐시에서 복사 후 x/tools를 v0.47.0으로 bump하여 Go 1.27로 재빌드:
+  ```bash
+  cp -r $GOMODCACHE/github.com/wailsapp/wails/v2@v2.10.1 /tmp/wails-src && chmod -R u+w /tmp/wails-src
+  cd /tmp/wails-src && go mod edit -require golang.org/x/tools@v0.47.0 && go mod tidy
+  go build -o "$(go env GOBIN)/wails" ./cmd/wails
+  ```
+- **현재 상태**: /Volumes/DATA/work/env/go/bin/wails (go1.27.0 + x/tools v0.47.0) — 다른 머신에서 Go 1.25+ 사용 시 동일 문제 재발 가능
+
+### T2. macOS 링크 오류: "Undefined symbols: _OBJC_CLASS_$_UTType" (2026-08-30 확인)
+- **증상**: `go build -tags desktop,production` 직접 실행 시 링크 실패
+- **원인**: 최신 macOS SDK에서 Wails가 UTType 참조 — `UniformTypeIdentifiers` 프레임워크 링크 필요
+- **해결**: `wails build`는 내부적으로 macOS 11+에서 자동으로 `-framework UniformTypeIdentifiers`를 CGO_LDFLAGS에 추가하므로 문제 없음. **직접 `go build -tags desktop,production` 실행 시에만 발생**:
+  ```bash
+  CGO_LDFLAGS="-framework UniformTypeIdentifiers" go build -tags desktop,production .
+  ```
+
+---
+
 ## 다음 세션 재개 지점
 
-- **재개 위치**: Phase 0.1 진행 중 (세 파일 생성 후 커밋 예정)
-- **다음 작업**: Phase 0.2 첫 커밋 → Phase 1.1 wails init
-- **미해결 이슈**: 없음
+- **재개 위치**: Phase 1.1 완료 (wails build 성공). 골격 커밋 후 Phase 1.2 (internal/config/) 시작
+- **다음 작업**: 골격 semantic commit → internal/config/ 구현 (config.go, loader.go, watcher.go, encryption.go, validator.go) → go test
+- **미해결 이슈**: 없음 (wails CLI 재빌드로 해소 — T1 참조)
 
 ---
 
@@ -90,6 +113,8 @@
 | 2026-08-30 23:00 | 계획 관련 4개 결정 (백지/webnvr/pion/Phase 1+2) | 계획 확정 |
 | 2026-08-30 23:08 | 모든 내용을 MEMORY.md에 저장 + 작업 지시마다 갱신 지시 | MEMORY.md 운영 방침 수립, 본 파일 생성 시작 |
 | 2026-08-30 23:08 | 계획대로 진행 승인 | Phase 0 실행 시작 |
+| 2026-08-30 23:08~23:15 | (자동) Phase 0 완료: 3개 문서 생성 + 첫 커밋 e95c402 | checklist.md 체크 갱신 |
+| 2026-08-30 23:16~23:52 | (자동) Phase 1.1: wails init → 루트 이동. wails build 실패 → 원인 추적 → **wails CLI 재빌드로 해소 (T1)** → 빌드 성공 | build/bin/webnvr.app 생성 확인 |
 
 ---
 
