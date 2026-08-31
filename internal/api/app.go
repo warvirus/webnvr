@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -115,19 +116,66 @@ func ensureMasterKey(configDir string, mgr *camera.Manager) error {
 	return nil
 }
 
-// StartWSServer는 로컬호스트(:8080)에 HTTP/WS 서버를 시작한다.
-// mux: /ws(스트림 중계) + /api/*(REST, v1.1). 포트 충돌 시 오류를 반환한다.
-func (a *App) StartWSServer() error {
-	a.wsServer = ws.NewServer(a.Stream, fmt.Sprintf("127.0.0.1:%d", a.Camera.appCfg.Server.WSPort))
+// StartWSServer는 설정된 바인드 주소(:8080)에 HTTP/WS 서버를 시작한다.
+// mux: /ws(스트림 중계) + /api/*(REST, v1.1) + /(프론트 UI). 포트 충돌 시 오류를 반환한다.
+func (a *App) StartWSServer(assets http.FileSystem) error {
+	bind := a.Camera.appCfg.Server.Bind
+	if bind == "" {
+		bind = "127.0.0.1" // 설정 누락 시 안전한 기본값
+	}
+	a.wsServer = ws.NewServer(a.Stream, fmt.Sprintf("%s:%d", bind, a.Camera.appCfg.Server.WSPort))
 
 	mux := http.NewServeMux()
 	mux.Handle("/ws", a.wsServer.Mux())
 	RegisterHTTP(mux, a)
+	if assets != nil {
+		registerUI(mux, assets)
+	}
 
 	if err := a.wsServer.StartWithHandler(CORS(mux)); err != nil {
 		return err
 	}
+	if bind != "127.0.0.1" && bind != "localhost" {
+		slog.Warn("HTTP 서버가 비사설 루프백 주소에 바인딩되었습니다 — 인증(Phase 6) 전까지 LAN 노출에 유의", "bind", bind)
+	}
 	return nil
+}
+
+// registerUI는 임베디드 프론트엔드(dist)를 "/"로 서빙한다.
+// 알 수 없는 경로는 SPA 폴백으로 index.html을 반환한다.
+func registerUI(mux *http.ServeMux, assets http.FileSystem) {
+	fileServer := http.FileServer(assets)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		p := strings.TrimPrefix(r.URL.Path, "/")
+		if p == "" {
+			p = "index.html"
+		}
+		if _, err := assets.Open(p); err != nil {
+			r.URL.Path = "/" // SPA 폴백
+		}
+		fileServer.ServeHTTP(w, r)
+	})
+}
+
+// LANAddresses는 로컬 머신의 LAN IPv4 주소 목록을 반환한다. (접속 URL 안내용)
+func LANAddresses(port int) []string {
+	var out []string
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return out
+	}
+	for _, ifc := range ifaces {
+		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, _ := ifc.Addrs()
+		for _, addr := range addrs {
+			if ipn, ok := addr.(*net.IPNet); ok && ipn.IP.To4() != nil && !ipn.IP.IsLoopback() {
+				out = append(out, fmt.Sprintf("http://%s:%d", ipn.IP.String(), port))
+			}
+		}
+	}
+	return out
 }
 
 // StopWSServer는 WebSocket 서버와 모든 스트림을 정지한다.

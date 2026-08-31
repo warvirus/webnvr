@@ -11,10 +11,11 @@ type AppConfig struct {
 	Logging   LoggingConfig   `json:"logging"`
 }
 
-// ServerConfig는 WebSocket/HTTP 서버 포트 설정을 나타낸다.
+// ServerConfig는 HTTP/WS 서버의 바인드 주소와 포트 설정을 나타낸다.
 type ServerConfig struct {
-	WSPort   int `json:"ws_port"`
-	HTTPPort int `json:"http_port"`
+	WSPort   int    `json:"ws_port"`
+	HTTPPort int    `json:"http_port"`
+	Bind     string `json:"bind"` // "127.0.0.1"(기본, 로컬 전용) 또는 "0.0.0.0"(LAN 공개)
 }
 
 // StreamConfig는 스트림 처리 기본 동작을 나타낸다.
@@ -56,6 +57,7 @@ func Default() *AppConfig {
 		Server: ServerConfig{
 			WSPort:   8080,
 			HTTPPort: 8081,
+			Bind:     "127.0.0.1",
 		},
 		Stream: StreamConfig{
 			DefaultTransport:     "tcp",

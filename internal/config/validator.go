@@ -21,6 +21,9 @@ func Validate(cfg *AppConfig) error {
 	if cfg.Server.WSPort == cfg.Server.HTTPPort {
 		return fmt.Errorf("ws_port와 http_port가 동일함: %d", cfg.Server.WSPort)
 	}
+	if strings.TrimSpace(cfg.Server.Bind) == "" {
+		return fmt.Errorf("server.bind는 비어 있을 수 없음 (127.0.0.1 또는 0.0.0.0)")
+	}
 
 	switch strings.ToLower(cfg.Stream.DefaultTransport) {
 	case "tcp", "udp":
