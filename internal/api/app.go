@@ -2,9 +2,14 @@
 package api
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"webnvr/internal/camera"
 	"webnvr/internal/config"
@@ -34,10 +39,80 @@ func New(configDir string) (*App, error) {
 	}
 	mgr := camera.NewManager(store)
 
+	if err := ensureMasterKey(configDir, mgr); err != nil {
+		return nil, err
+	}
+
+	cameraSvc := &CameraService{mgr: mgr, appCfg: appCfg, configDir: configDir}
 	return &App{
-		Camera: &CameraService{mgr: mgr, appCfg: appCfg},
+		Camera: cameraSvc,
 		Stream: NewStreamService(mgr),
 	}, nil
+}
+
+// ensureMasterKey는 마스터 키를 확보하고 필요 시 레거시 폴백 키로 암호화된
+// 비밀번호를 새 키로 마이그레이션한다.
+// 우선순위: 환경변수 > 키 파일(config/.masterkey) > 신규 생성(폴백 키 마이그레이션).
+func ensureMasterKey(configDir string, mgr *camera.Manager) error {
+	keyFile := filepath.Join(configDir, ".masterkey")
+
+	// 1) 환경변수가 최우선 — 파일/마이그레이션 없이 사용
+	if os.Getenv(config.EnvMasterKey) != "" {
+		config.SetSessionKey(nil, config.KeySourceEnv)
+		return nil
+	}
+
+	// 2) 키 파일 존재 → 로드
+	if b, err := os.ReadFile(keyFile); err == nil {
+		key, err := hex.DecodeString(strings.TrimSpace(string(b)))
+		if err != nil || len(key) != 32 {
+			return fmt.Errorf("마스터 키 파일이 손상되었습니다: %s (삭제 후 재생성 가능)", keyFile)
+		}
+		config.SetSessionKey(key, config.KeySourceFile)
+		return nil
+	}
+
+	// 3) 신규 생성 — 기존 비밀번호가 폴백 키로 암호화되어 있으면 마이그레이션
+	cams, err := mgr.List()
+	if err != nil {
+		return err
+	}
+	plaintexts := map[string]string{}
+	for i := range cams {
+		if cams[i].Password == "" {
+			continue
+		}
+		pt, err := mgr.PasswordOf(&cams[i]) // 현재(폴백) 키로 복호화 시도
+		if err != nil {
+			slog.Warn("기존 비밀번호 복호화 실패 — 마이그레이션에서 제외", "camera", cams[i].ID)
+			continue
+		}
+		plaintexts[cams[i].ID] = pt
+	}
+
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return fmt.Errorf("마스터 키 생성 실패: %w", err)
+	}
+	if err := os.WriteFile(keyFile, []byte(hex.EncodeToString(key)), 0o600); err != nil {
+		return fmt.Errorf("마스터 키 파일 저장 실패: %w", err)
+	}
+	config.SetSessionKey(key, config.KeySourceFile)
+
+	// 새 키로 재암호화
+	for i := range cams {
+		pt, ok := plaintexts[cams[i].ID]
+		if !ok {
+			continue
+		}
+		if _, err := mgr.Update(cams[i].ID, camera.UpdateRequest{Password: &pt}); err != nil {
+			slog.Warn("비밀번호 재암호화 실패", "camera", cams[i].ID, "err", err)
+		}
+	}
+	if len(plaintexts) > 0 {
+		slog.Info("마스터 키 신규 생성 + 기존 비밀번호 마이그레이션 완료", "cameras", len(plaintexts), "file", keyFile)
+	}
+	return nil
 }
 
 // StartWSServer는 로컬호스트(:8080)에 HTTP/WS 서버를 시작한다.

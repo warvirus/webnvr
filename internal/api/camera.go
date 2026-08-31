@@ -1,11 +1,13 @@
-// 프론트엔드에 노출되는 카메라 관리 Wails 바인딩 서비스다.
+// 카메라 관리 서비스 계층이다. HTTP/WS 핸들러가 재사용한다 (v1.1).
 package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -126,11 +128,15 @@ type PresetDTO struct {
 	Name  string `json:"name"`
 }
 
-// CameraService는 카메라 CRUD와 ONVIF 연산을 프론트엔드에 바인딩한다.
+// CameraService는 카메라 CRUD와 ONVIF 연산을 담당하는 서비스 계층이다.
 type CameraService struct {
-	mgr    *camera.Manager
-	appCfg *config.AppConfig
+	mgr       *camera.Manager
+	appCfg    *config.AppConfig
+	configDir string
 }
+
+// SetConfigDir는 설정 디렉토리를 지정한다. (App 조립 시 호출)
+func (s *CameraService) SetConfigDir(dir string) { s.configDir = dir }
 
 // ListCameras는 모든 카메라를 반환한다.
 func (s *CameraService) ListCameras() ([]CameraDTO, error) {
@@ -334,6 +340,108 @@ func onvifCall[T any](mgr *camera.Manager, cameraID string, fn func(cli *onvif.C
 		profile = profiles[0].Token
 	}
 	return fn(cli, profile)
+}
+
+// BackupFile은 내보내기/가져오기용 백업 파일 구조다. 비밀번호는 포함하지 않는다.
+type BackupFile struct {
+	Version    int         `json:"version"`
+	ExportedAt string      `json:"exportedAt"`
+	Cameras    []CameraDTO `json:"cameras"`
+	AppConfig  any         `json:"appConfig,omitempty"`
+}
+
+// SecurityStatus는 보안 관련 상태다.
+type SecurityStatus struct {
+	MasterKeySource string `json:"masterKeySource"` // env | file | fallback
+}
+
+// AppConfig는 현재 앱 설정을 반환한다.
+func (s *CameraService) AppConfig() *config.AppConfig {
+	return s.appCfg
+}
+
+// UpdateAppConfig는 앱 설정을 검증 후 저장하고 메모리 값을 갱신한다.
+// raw는 설정 JSON 전체(병합 아님 — 전체 교체)이다.
+func (s *CameraService) UpdateAppConfig(raw map[string]any) (*config.AppConfig, error) {
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("설정 직렬화 실패: %w", err)
+	}
+	cfg := config.Default()
+	if err := json.Unmarshal(b, cfg); err != nil {
+		return nil, fmt.Errorf("설정 파싱 실패: %w", err)
+	}
+	if err := config.Validate(cfg); err != nil {
+		return nil, err
+	}
+	if err := config.Save(filepath.Join(s.configDir, "app.json"), cfg); err != nil {
+		return nil, err
+	}
+	s.appCfg = cfg
+	return cfg, nil
+}
+
+// ExportBackup은 카메라 목록(비밀번호 제외)과 앱 설정을 백업 구조로 반환한다.
+func (s *CameraService) ExportBackup() (BackupFile, error) {
+	cams, err := s.ListCameras()
+	if err != nil {
+		return BackupFile{}, err
+	}
+	return BackupFile{
+		Version:    1,
+		ExportedAt: time.Now().UTC().Format(time.RFC3339),
+		Cameras:    cams,
+		AppConfig:  s.appCfg,
+	}, nil
+}
+
+// RestoreBackup은 백업으로 카메라 목록을 대체한다. 비밀번호는 백업에 없으므로 재입력이 필요하다.
+func (s *CameraService) RestoreBackup(backup BackupFile) (int, error) {
+	if backup.Version != 1 {
+		return 0, fmt.Errorf("지원하지 않는 백업 버전: %d", backup.Version)
+	}
+	// 기존 카메라 전체 삭제
+	existing, err := s.ListCameras()
+	if err != nil {
+		return 0, err
+	}
+	for _, c := range existing {
+		if err := s.mgr.Delete(c.ID); err != nil {
+			return 0, err
+		}
+	}
+	// 백업 복원 (비밀번호 제외)
+	added := 0
+	for _, dto := range backup.Cameras {
+		req := camera.CreateRequest{
+			Name:         dto.Name,
+			Type:         dto.Type,
+			XAddr:        dto.XAddr,
+			Username:     dto.Username,
+			Password:     "", // 백업에 비밀번호 없음
+			ProfileToken: dto.ProfileToken,
+			StreamURL:    dto.StreamURL,
+			StreamConfig: dto.StreamConfig,
+			PTZSupported: dto.PTZSupported,
+			GroupID:      dto.GroupID,
+		}
+		saved, err := s.mgr.Create(req)
+		if err != nil {
+			return added, fmt.Errorf("복원 실패 (%s): %w", dto.Name, err)
+		}
+		// 순서/사용여부 복원 (ID는 신규 발급 — 프론트가 전체 재조회)
+		enabled := dto.Enabled
+		if _, err := s.mgr.Update(saved.ID, camera.UpdateRequest{Enabled: &enabled}); err != nil {
+			return added, err
+		}
+		added++
+	}
+	return added, nil
+}
+
+// SecurityStatusOf는 현재 보안 상태를 반환한다.
+func SecurityStatusOf() SecurityStatus {
+	return SecurityStatus{MasterKeySource: string(config.KeySourceOf())}
 }
 
 // TestDirectStream은 직접 스트림 URL의 형식과 도달 가능성을 검증한다.

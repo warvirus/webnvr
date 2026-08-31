@@ -251,3 +251,98 @@ func TestNewAppEmptyDir(t *testing.T) {
 	_ = app
 	_ = filepath.Join(dir, "app.json")
 }
+
+// TestHTTPConfig는 앱 설정 조회/수정을 확인한다.
+func TestHTTPConfig(t *testing.T) {
+	srv := newTestApp(t)
+
+	status, cfgAny := doJSON(t, http.MethodGet, srv.URL+"/api/config", nil)
+	cfg := obj(t, cfgAny)
+	if status != 200 || cfg["version"] != float64(1) {
+		t.Fatalf("설정 조회 실패: %d %v", status, cfg)
+	}
+
+	// 유효한 전체 교체
+	status, savedAny := doJSON(t, http.MethodPut, srv.URL+"/api/config", map[string]any{
+		"version": 1,
+		"server":  map[string]any{"ws_port": 8080, "http_port": 8081},
+		"stream":  map[string]any{"default_transport": "udp", "rtp_timeout_ms": 5000, "jitter_buffer_ms": 150, "max_concurrent_streams": 20},
+		"decoder": map[string]any{"prefer_hardware": true, "max_threads": 4},
+		"logging": map[string]any{"level": "info", "file": "logs/app.log", "max_size_mb": 100, "max_backups": 5},
+	})
+	if status != 200 {
+		t.Fatalf("설정 수정 실패: %d", status)
+	}
+	saved := obj(t, savedAny)
+	if saved["stream"].(map[string]any)["default_transport"] != "udp" {
+		t.Errorf("transport 반영 안 됨: %v", saved["stream"])
+	}
+
+	// 유효하지 않은 설정 → 400
+	status, _ = doJSON(t, http.MethodPut, srv.URL+"/api/config", map[string]any{
+		"version": 1, "server": map[string]any{"ws_port": 0, "http_port": 8081},
+	})
+	if status != 400 {
+		t.Errorf("잘못된 설정 상태 = %d, want 400", status)
+	}
+}
+
+// TestHTTPBackupRestore는 백업 내보내기/복원을 확인한다.
+func TestHTTPBackupRestore(t *testing.T) {
+	srv := newTestApp(t)
+
+	// 카메라 2대 등록
+	for _, name := range []string{"a", "b"} {
+		s, _ := doJSON(t, http.MethodPost, srv.URL+"/api/cameras", map[string]any{
+			"name": name, "type": "rtsp", "streamUrl": "rtsp://127.0.0.1:9/x",
+		})
+		_ = s
+	}
+
+	// 백업 내보내기
+	status, backupAny := doJSON(t, http.MethodGet, srv.URL+"/api/backup", nil)
+	backup := obj(t, backupAny)
+	if status != 200 {
+		t.Fatalf("백업 상태 = %d", status)
+	}
+	cams, _ := backup["cameras"].([]any)
+	if len(cams) != 2 {
+		t.Fatalf("백업 카메라 수 = %d", len(cams))
+	}
+	// 비밀번호 필드가 백업에 없어야 한다
+	c0 := cams[0].(map[string]any)
+	if _, exists := c0["password"]; exists {
+		t.Error("백업에 비밀번호 포함됨")
+	}
+
+	// 삭제 후 복원
+	for _, c := range cams {
+		doJSON(t, http.MethodDelete, srv.URL+"/api/cameras/"+c.(map[string]any)["id"].(string), nil)
+	}
+	status, resAny := doJSON(t, http.MethodPost, srv.URL+"/api/backup/restore", backup)
+	res := obj(t, resAny)
+	if status != 200 || res["restored"] != float64(2) {
+		t.Fatalf("복원 실패: %d %v", status, res)
+	}
+
+	// 복원 결과 확인 (비밀번호 없음 → hasPassword false)
+	status, listAny := doJSON(t, http.MethodGet, srv.URL+"/api/cameras", nil)
+	list := listAny.([]any)
+	if status != 200 || len(list) != 2 {
+		t.Fatalf("복원 후 목록: %d (%d대)", status, len(list))
+	}
+	c1 := list[0].(map[string]any)
+	if c1["hasPassword"] != false {
+		t.Error("복원된 카메라에 hasPassword=true")
+	}
+}
+
+// TestHTTPSecurity는 보안 상태 엔드포인트를 확인한다.
+func TestHTTPSecurity(t *testing.T) {
+	srv := newTestApp(t)
+	status, secAny := doJSON(t, http.MethodGet, srv.URL+"/api/security", nil)
+	sec := obj(t, secAny)
+	if status != 200 || sec["masterKeySource"] == "" {
+		t.Fatalf("보안 상태 실패: %d %v", status, sec)
+	}
+}

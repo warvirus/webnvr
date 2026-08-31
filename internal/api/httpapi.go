@@ -195,6 +195,69 @@ func RegisterHTTP(mux *http.ServeMux, app *App) {
 		writeJSON(w, http.StatusOK, profiles)
 	})
 
+	mux.HandleFunc("/api/security", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET만 허용"})
+			return
+		}
+		writeJSON(w, http.StatusOK, SecurityStatusOf())
+	})
+
+	mux.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			writeJSON(w, http.StatusOK, app.Camera.AppConfig())
+			return
+		}
+		if r.Method != http.MethodPut {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET/PUT만 허용"})
+			return
+		}
+		var cfg map[string]any
+		if he := decodeBody(r, &cfg); he != nil {
+			writeErr(w, he)
+			return
+		}
+		saved, err := app.Camera.UpdateAppConfig(cfg)
+		if err != nil {
+			writeErr(w, errBadReq(err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, saved)
+	})
+
+	// 백업: 카메라 목록(비밀번호 제외) + 앱 설정을 하나의 JSON으로 내려준다.
+	mux.HandleFunc("/api/backup", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET만 허용"})
+			return
+		}
+		backup, err := app.Camera.ExportBackup()
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, backup)
+	})
+
+	// 복원: 백업 JSON을 받아 카메라를 대체한다. 비밀번호는 백업에 없으므로 재입력이 필요하다.
+	mux.HandleFunc("/api/backup/restore", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST만 허용"})
+			return
+		}
+		var backup BackupFile
+		if he := decodeBody(r, &backup); he != nil {
+			writeErr(w, he)
+			return
+		}
+		added, err := app.Camera.RestoreBackup(backup)
+		if err != nil {
+			writeErr(w, errBadReq(err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "restored": added})
+	})
+
 	// /api/cameras/{id}[/...] 하위 라우트
 	mux.HandleFunc("/api/cameras/", func(w http.ResponseWriter, r *http.Request) {
 		rest := strings.TrimPrefix(r.URL.Path, "/api/cameras/")

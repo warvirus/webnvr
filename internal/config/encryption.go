@@ -23,27 +23,70 @@ const EnvMasterKey = "WEBNVR_MASTER_KEY"
 // EncryptedPrefix는 암호화된 값임을 표시하는 접두어다.
 const EncryptedPrefix = "encrypted:"
 
+// KeySource는 현재 마스터 키의 출처다.
+type KeySource string
+
+const (
+	KeySourceEnv      KeySource = "env"      // 환경변수
+	KeySourceFile     KeySource = "file"     // 키 파일 (config/.masterkey)
+	KeySourceFallback KeySource = "fallback" // 개발용 폴백 (레거시)
+)
+
 const pbkdf2Iterations = 100_000
 
 var errNotEncrypted = errors.New("암호화된 형식이 아님 (encrypted: 접두어 없음)")
 
-// MasterKey는 환경변수에서 32바이트 마스터 키를 읽는다.
-// 미설정 시 개발용 폴백 키를 사용하며 경고를 남긴다.
-func MasterKey() ([]byte, error) {
-	v := os.Getenv(EnvMasterKey)
-	if v == "" {
-		slog.Warn("마스터 키 환경변수가 설정되지 않아 개발용 폴백 키 사용", "env", EnvMasterKey)
-		k := sha256.Sum256([]byte("webnvr-dev-fallback-key"))
-		return k[:], nil
+// sessionKey는 App 기동 시 설정되는 세션 키다 (파일 또는 마이그레이션 결과).
+var (
+	sessionKey   []byte
+	sessionSrc   KeySource
+	fallbackWarn bool
+)
+
+// SetSessionKey는 세션 마스터 키를 설정한다. (App 기동 시 1회)
+func SetSessionKey(key []byte, src KeySource) {
+	sessionKey = key
+	sessionSrc = src
+}
+
+// KeySourceOf는 현재 적용 중인 키 출처를 반환한다.
+func KeySourceOf() KeySource {
+	if os.Getenv(EnvMasterKey) != "" {
+		return KeySourceEnv
 	}
+	if sessionKey != nil {
+		return sessionSrc
+	}
+	return KeySourceFallback
+}
+
+// normalizeKey는 임의 키 문자열을 32바이트로 정규화한다.
+func normalizeKey(v string) []byte {
 	if b, err := hex.DecodeString(v); err == nil && len(b) == 32 {
-		return b, nil
+		return b
 	}
 	if b, err := base64.StdEncoding.DecodeString(v); err == nil && len(b) == 32 {
-		return b, nil
+		return b
 	}
 	// 32바이트가 아닌 임의 문자열은 SHA-256으로 정규화한다.
 	k := sha256.Sum256([]byte(v))
+	return k[:]
+}
+
+// MasterKey는 현재 적용할 마스터 키를 반환한다.
+// 우선순위: 환경변수 > 세션 키(키 파일/마이그레이션) > 개발용 폴백.
+func MasterKey() ([]byte, error) {
+	if v := os.Getenv(EnvMasterKey); v != "" {
+		return normalizeKey(v), nil
+	}
+	if sessionKey != nil {
+		return sessionKey, nil
+	}
+	if !fallbackWarn {
+		fallbackWarn = true
+		slog.Warn("마스터 키가 설정되지 않아 개발용 폴백 키 사용", "env", EnvMasterKey)
+	}
+	k := sha256.Sum256([]byte("webnvr-dev-fallback-key"))
 	return k[:], nil
 }
 
