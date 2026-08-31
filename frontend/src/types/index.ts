@@ -68,16 +68,10 @@ export interface RTPPacketItem {
   sq: number;     // sequence
 }
 
-// 타일에 표시할 스트림 통계 (프론트엔드 워커에서 산출)
-export interface StreamStats {
-  fps: number;
-  kbps: number;
-  packets: number;
-  drops: number;
-}
+// 스트림 통계/상태는 types/stream.ts가 단일 출처다 (재노출)
+export type {StreamStats, StreamState, StatSample, PacketIn} from './stream';
 
 // 모니터링 그리드 모드 (타일 수 기준)
 export type GridMode = 'auto' | 1 | 4 | 9 | 16;
 
-// 카메라별 스트림 상태
-export type StreamState = 'idle' | 'starting' | 'streaming' | 'error';
+

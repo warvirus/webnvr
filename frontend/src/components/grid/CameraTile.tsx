@@ -1,10 +1,11 @@
-// 단일 카메라 타일 — 캔버스 렌더링 + OSD 오버레이 + 통계 표시
-import React, {useEffect, useMemo, useRef, useState} from 'react';
+// 단일 카메라 타일 — 캔버스 렌더링 + OSD 오버레이 + 통계/스파크라인 표시
+import React, {useEffect, useRef, useState} from 'react';
 import {CameraDTO} from '../../types/api';
 import {StreamState, StreamStats} from '../../types';
 import {VideoRenderer} from './VideoRenderer';
 import {IconCamera, IconPlay} from '../common/Icons';
 import {useStreamStore} from '../../store/streamStore';
+import {Sparkline} from '../stats/Sparkline';
 
 interface Props {
   camera: CameraDTO;
@@ -38,6 +39,7 @@ export function CameraTile({camera, channel, state, stats, selected, active, onS
   const rendererRef = useRef<VideoRenderer | null>(null);
   const [glFailed, setGlFailed] = useState(false);
   const startStream = useStreamStore(s => s.startStream);
+  const history = useStreamStore(s => s.history[camera.id]);
 
   useEffect(() => {
     if (!canvasRef.current || !active) return;
@@ -72,6 +74,11 @@ export function CameraTile({camera, channel, state, stats, selected, active, onS
       <div className="tile-head">
         <span className="plate">CH {String(channel).padStart(2, '0')}</span>
         <span className="tile-name">{camera.name}</span>
+        {history && history.length > 1 && (
+          <span className="tile-spark">
+            <Sparkline samples={history} metric="fps" width={56} height={14}/>
+          </span>
+        )}
         <span className="osd-status">
           {state === 'streaming' && stats ? (
             <span className="tile-stats">{stats.fps} fps · {stats.kbps} kbps{stats.drops > 0 ? ` · 드롭 ${stats.drops}` : ''}</span>
