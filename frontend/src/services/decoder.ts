@@ -37,10 +37,14 @@ export interface SessionStats {
   drops: number;
 }
 
-// 디코더 포맷 후보 (Safari는 avcC description 필수, Chromium은 둘 다 허용)
-const FORMAT_AVCC = 0;
-const FORMAT_ANNEXB = 1;
+// 디코더 청크 포맷 후보 (실측 기준 — F8/F12):
+// ANNEXB : description 없음 + 시작코드 청크 — 사용자 WebKit(메인 스레드)에서 동작 확인
+// AVCC   : description=avcC + 길이 접두어 청크 — Annex B 실패 환경용 폴백
+// 성공한 포맷은 모듈 레벨에서 기억해 재접속 시 처음부터 사용한다.
+const FORMAT_ANNEXB = 0;
+const FORMAT_AVCC = 1;
 const FORMAT_COUNT = 2;
+let lastGoodFormat: number | null = null;
 
 const TICK_MS = 30;          // 큐 처리 주기 (지터 스무딩)
 const MAX_QUEUE = 1200;      // 큐 상한 (버스트 흡수)
@@ -150,7 +154,7 @@ export class Session {
   cameraId: string;
   config: CodecConfigIn | null = null;
   decoder: VideoDecoder | null = null;
-  formatIdx = FORMAT_AVCC;   // 현재 시도 중인 청크 포맷
+  formatIdx = lastGoodFormat ?? FORMAT_ANNEXB; // 마지막 성공 포맷 우선 (기본: Annex B)
   sawKeyframe = false;
 
   queue: PacketIn[] = [];
@@ -426,7 +430,9 @@ export class Session {
     });
     this.frames++;
     if (this.frames === 1) {
-      // 첫 프레임 디코딩 성공 → UI의 오류/대기 상태를 해제한다
+      // 첫 프레임 디코딩 성공 → 성공 포맷을 기억해(재접속 시 우선 사용)
+      // UI의 오류/대기 상태를 해제한다
+      lastGoodFormat = this.formatIdx;
       this.ev.onDecoded(this.cameraId);
     }
     try {

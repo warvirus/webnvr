@@ -448,6 +448,10 @@ fragColor = texture(u_tex, v_uv);
 - 레터박스: 캔버스 크기와 프레임 종횡비 비교 → gl.viewport로 중앙 배치
 - 폴백: VideoFrame 직접 업로드가 실패하는 WebView에서는 2D 캔버스
   (drawImage) 우회 후 캔버스를 텍스처로 업로드
+- 청크 포맷 후보 (v1.1 실측): **Annex B 기본**(사용자 WebKit 메인 스레드 검증) →
+  무출력 4초 시 AVCC(avcC description)로 전환. 성공 포맷은 모듈 레벨에서
+  기억해 재접속 시 처음부터 사용. 디코더는 메인 스레드에서 실행한다
+  (Worker 내 VideoDecoder 출력 무시 문제 — 컨텍스트 노트 F8)
 
 ### 9.2 YUV420P 3텍스처 셰이더 (BT.709) — ffmpeg.wasm 폴백용 (보류)
 기존 v1.0 §9의 Y/U/V 3텍스처 셰이더는 VideoDecoder 미지원 환경의
