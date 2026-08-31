@@ -31,11 +31,16 @@ type connState struct {
 	cancels map[string]func() // cameraID → 구독 해제
 }
 
-// sendMsg는 메시지를 직렬화해 전송한다. (쓰기 락 보호)
-func (s *connState) sendMsg(m ServerMsg) {
+// sendRaw는 임의 메시지를 직렬화해 전송한다. (쓰기 락 보호)
+func (s *connState) sendRaw(v any) {
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
-	_ = s.conn.WriteJSON(m)
+	_ = s.conn.WriteJSON(v)
+}
+
+// sendMsg는 메시지를 직렬화해 전송한다. (쓰기 락 보호)
+func (s *connState) sendMsg(m ServerMsg) {
+	s.sendRaw(m)
 }
 
 // handleError는 스트림 오류를 클라이언트에 알린다.
@@ -74,6 +79,7 @@ func (s *connState) startStream(ctrl Controller, cameraID string) {
 }
 
 // pump는 스트림 이벤트를 WebSocket 메시지로 변환해 전송한다.
+// RTP 패킷은 즉시 도착한 만큼 배치로 묶어 전송한다(고비트레이트 스트림 대응).
 func (s *connState) pump(cameraID string, ch <-chan stream.Event, cancel func()) {
 	defer func() {
 		s.mu.Lock()
@@ -81,13 +87,69 @@ func (s *connState) pump(cameraID string, ch <-chan stream.Event, cancel func())
 		s.mu.Unlock()
 		cancel()
 	}()
+
+	codec := ""
+	flushBatch := func(batch []RTPPacketItem) {
+		if len(batch) == 0 {
+			return
+		}
+		s.sendRaw(&RTPBatchMsg{
+			Type:     MsgRTPBatch,
+			CameraID: cameraID,
+			Codec:    codec,
+			Packets:  batch,
+		})
+	}
+
+	batch := make([]RTPPacketItem, 0, 64)
 	for ev := range ch {
 		switch e := ev.(type) {
 		case stream.StartedEvent:
+			flushBatch(batch)
+			batch = batch[:0]
+			codec = string(e.Info.Codec)
 			s.sendMsg(streamStartedMsg(e.Info))
 		case stream.PacketEvent:
-			s.sendMsg(rtpPacketMsg(e.Packet))
+			batch = append(batch, RTPPacketItem{
+				Payload:   base64.StdEncoding.EncodeToString(e.Packet.Payload),
+				Timestamp: e.Packet.Timestamp,
+				Marker:    e.Packet.Marker,
+				Sequence:  e.Packet.Sequence,
+			})
+			// 채널에 대기 중인 패킷을 즉시 흡수해 배치 크기를 키운다
+		drain:
+			for len(batch) < 128 {
+				select {
+				case ev2, ok := <-ch:
+					if !ok {
+						break drain
+					}
+					switch e2 := ev2.(type) {
+					case stream.PacketEvent:
+						batch = append(batch, RTPPacketItem{
+							Payload:   base64.StdEncoding.EncodeToString(e2.Packet.Payload),
+							Timestamp: e2.Packet.Timestamp,
+							Marker:    e2.Packet.Marker,
+							Sequence:  e2.Packet.Sequence,
+						})
+					case stream.StartedEvent:
+						flushBatch(batch)
+						batch = batch[:0]
+						codec = string(e2.Info.Codec)
+						s.sendMsg(streamStartedMsg(e2.Info))
+					case stream.StoppedEvent:
+						flushBatch(batch)
+						s.sendMsg(ServerMsg{Type: MsgStreamStopped, CameraID: cameraID, Reason: e2.Reason})
+						return
+					}
+				default:
+					break drain
+				}
+			}
+			flushBatch(batch)
+			batch = batch[:0]
 		case stream.StoppedEvent:
+			flushBatch(batch)
 			s.sendMsg(ServerMsg{Type: MsgStreamStopped, CameraID: cameraID, Reason: e.Reason})
 			return
 		}
@@ -108,19 +170,6 @@ func streamStartedMsg(info stream.Info) ServerMsg {
 		VPS:         base64.StdEncoding.EncodeToString(info.VPS),
 		Width:       info.Width,
 		Height:      info.Height,
-	}
-}
-
-// rtpPacketMsg는 Packet을 rtp_packet 메시지로 변환한다.
-func rtpPacketMsg(pkt stream.Packet) ServerMsg {
-	return ServerMsg{
-		Type:      MsgRTPPacket,
-		CameraID:  pkt.CameraID,
-		Codec:     string(pkt.Codec),
-		Payload:   base64.StdEncoding.EncodeToString(pkt.Payload),
-		Timestamp: pkt.Timestamp,
-		Marker:    pkt.Marker,
-		Sequence:  pkt.Sequence,
 	}
 }
 

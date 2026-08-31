@@ -61,6 +61,7 @@ const (
 const (
 	MsgStreamStarted    = "stream_started"
 	MsgRTPPacket        = "rtp_packet"
+	MsgRTPBatch         = "rtp_batch" // 여러 RTP 패킷의 배치 전송 (고비트레이트 스트림용 확장)
 	MsgStreamStopped    = "stream_stopped"
 	MsgStreamError      = "stream_error"
 	MsgCameraDiscovered = "camera_discovered"
@@ -68,3 +69,19 @@ const (
 	MsgStats            = "stats"
 	MsgPong             = "pong"
 )
+
+// RTPPacketItem은 rtp_batch의 개별 패킷이다. JSON 크기 절감을 위해 축약 키를 사용한다.
+type RTPPacketItem struct {
+	Payload   string `json:"p"`           // base64 RTP payload
+	Timestamp uint32 `json:"ts"`          // RTP 타임스탬프
+	Marker    bool   `json:"m,omitempty"` // marker 비트
+	Sequence  uint16 `json:"sq"`          // 시퀀스 번호
+}
+
+// RTPBatchMsg는 카메라 하나의 RTP 패킷들을 묶어 전송한다.
+type RTPBatchMsg struct {
+	Type     string          `json:"type"` // "rtp_batch"
+	CameraID string          `json:"cameraId"`
+	Codec    string          `json:"codec,omitempty"`
+	Packets  []RTPPacketItem `json:"packets"`
+}

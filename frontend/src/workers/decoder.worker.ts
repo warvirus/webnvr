@@ -556,6 +556,19 @@ ctx.onmessage = (ev: MessageEvent) => {
       });
       break;
     }
+    case 'packet_batch': {
+      const s = sessions.get(msg.cameraId);
+      if (!s) break;
+      for (const p of msg.packets) {
+        s.push({
+          seq: p.sq & 0xffff,
+          ts: p.ts >>> 0,
+          marker: !!p.m,
+          payload: b64ToBytes(p.p),
+        });
+      }
+      break;
+    }
     case 'detach':
     case 'reset': {
       const s = sessions.get(msg.cameraId);

@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -17,9 +18,9 @@ type msg map[string]any
 
 func main() {
 	if len(os.Args) < 2 {
-		log.Fatal("사용법: wstest <cameraId> [seconds]")
+		log.Fatal("사용법: wstest <cameraId,...(콤마 구분)> [seconds]")
 	}
-	cameraID := os.Args[1]
+	cameraIDs := strings.Split(os.Args[1], ",")
 	seconds := 5
 	if len(os.Args) > 2 {
 		if n, err := strconv.Atoi(os.Args[2]); err == nil {
@@ -40,17 +41,19 @@ func main() {
 		}
 	}
 
-	send(msg{"type": "start_stream", "cameraId": cameraID})
-	defer send(msg{"type": "stop_stream", "cameraId": cameraID})
+	for _, id := range cameraIDs {
+		send(msg{"type": "start_stream", "cameraId": id})
+		defer send(msg{"type": "stop_stream", "cameraId": id})
+	}
 
 	ws.SetReadDeadline(time.Now().Add(time.Duration(seconds+5) * time.Second))
 
-	var (
-		started   bool
-		packets   int
-		bytes     int64
-		startTime time.Time
-	)
+	startedSet := map[string]bool{}
+	packets := make(map[string]int)
+	bytesArr := make(map[string]int64)
+	lastSeqs := make(map[string]int64)
+	gapMap := make(map[string]int64)
+	startTime := time.Now()
 	deadline := time.Now().Add(time.Duration(seconds) * time.Second)
 	for time.Now().Before(deadline) {
 		_, raw, err := ws.ReadMessage()
@@ -61,20 +64,38 @@ func main() {
 		if err := json.Unmarshal(raw, &m); err != nil {
 			continue
 		}
+		cid, _ := m["cameraId"].(string)
 		switch m["type"] {
 		case "stream_started":
-			started = true
+			startedSet[cid] = true
 			startTime = time.Now()
-			fmt.Printf("stream_started: codec=%v width=%v height=%v clockRate=%v sps_len=%v pps_len=%v\n",
-				m["codec"], m["width"], m["height"], m["clockRate"],
-				len(fmt.Sprint(m["sps"])), len(fmt.Sprint(m["pps"])))
+			fmt.Printf("stream_started [%s]: codec=%v width=%v height=%v\n",
+				cid, m["codec"], m["width"], m["height"])
 		case "rtp_packet":
-			packets++
+			packets[cid]++
 			if p, ok := m["payload"].(string); ok {
-				bytes += int64(len(p))
+				bytesArr[cid] += int64(len(p))
+			}
+			if seq, ok := m["sequence"].(float64); ok {
+				lastSeqs[cid] = trackGap(lastSeqs, gapMap, cid, int64(seq))
+			}
+		case "rtp_batch":
+			items, _ := m["packets"].([]any)
+			for _, it := range items {
+				item, _ := it.(map[string]any)
+				if item == nil {
+					continue
+				}
+				packets[cid]++
+				if p, ok := item["p"].(string); ok {
+					bytesArr[cid] += int64(len(p))
+				}
+				if sq, ok := item["sq"].(float64); ok {
+					lastSeqs[cid] = trackGap(lastSeqs, gapMap, cid, int64(sq))
+				}
 			}
 		case "stream_error":
-			log.Fatalf("stream_error: %v", m["error"])
+			log.Fatalf("stream_error [%s]: %v", cid, m["error"])
 		case "stream_stopped":
 			return
 		}
@@ -83,9 +104,35 @@ func main() {
 	if elapsed <= 0 {
 		elapsed = 1
 	}
-	if !started {
-		log.Fatal("stream_started 수신 실패")
+	totalPkts := 0
+	totalGaps := 0
+	for _, id := range cameraIDs {
+		if !startedSet[id] {
+			log.Fatalf("stream_started 수신 실패: %s", id)
+		}
+		g := gapMap[id]
+		p := packets[id]
+		totalPkts += p
+		totalGaps += int(g)
+		fmt.Printf("[%s] 패킷 %d개, %.1f kbps, 갭 %d (%.2f%%)\n",
+			id, p, float64(bytesArr[id])*8/1000/elapsed, g,
+			float64(g)*100/float64(p+int(g)))
 	}
-	fmt.Printf("WS 수신 결과: 패킷 %d개, %.1f kbps, %.1f초\n",
-		packets, float64(bytes)*8/1000/elapsed, elapsed)
+	fmt.Printf("합계: 패킷 %d개, 서버→클라이언트 유실 %.2f%% (%.1f초)\n",
+		totalPkts, float64(totalGaps)*100/float64(totalPkts+totalGaps), elapsed)
+}
+
+// trackGap은 시퀀스 갭을 누적하고 새 lastSeq를 반환한다.
+func trackGap(lastSeqs map[string]int64, gaps map[string]int64, cid string, seq int64) int64 {
+	newLast := seq & 0xffff
+	if last, ok := lastSeqs[cid]; ok {
+		gap := newLast - (last & 0xffff)
+		if gap < 0 {
+			gap += 0x10000
+		}
+		if gap > 1 {
+			gaps[cid] += gap - 1
+		}
+	}
+	return newLast
 }

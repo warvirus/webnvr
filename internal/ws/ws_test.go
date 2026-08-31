@@ -3,6 +3,7 @@ package ws
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net"
 	"sync"
@@ -185,13 +186,29 @@ func TestStartStreamPump(t *testing.T) {
 		t.Errorf("SPS base64 불일치: %q", got)
 	}
 
-	// rtp_packet 확인
-	m2 := recv(t, c)
-	if m2.Type != MsgRTPPacket || m2.Sequence != 1 || !m2.Marker {
-		t.Fatalf("rtp_packet 불일치: %+v", m2)
+	// rtp_batch 확인 (패킷은 배치로 전송된다)
+	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, raw, err := c.ReadMessage()
+	if err != nil {
+		t.Fatalf("ReadMessage() err = %v", err)
 	}
-	if got, want := m2.Payload, base64.StdEncoding.EncodeToString([]byte{1, 2, 3, 4}); got != want {
-		t.Errorf("payload base64 불일치")
+	var batch RTPBatchMsg
+	if err := json.Unmarshal(raw, &batch); err != nil {
+		t.Fatalf("배치 언마셜 실패: %v", err)
+	}
+	if batch.Type != MsgRTPBatch || batch.CameraID != "cam-1" {
+		t.Fatalf("rtp_batch 불일치: %+v", batch)
+	}
+	if len(batch.Packets) == 0 {
+		t.Fatal("배치에 패킷이 없음")
+	}
+	p0 := batch.Packets[0]
+	if p0.Sequence != 1 || !p0.Marker {
+		t.Errorf("첫 패킷 불일치: %+v", p0)
+	}
+	wantPayload := base64.StdEncoding.EncodeToString([]byte{1, 2, 3, 4})
+	if p0.Payload != wantPayload {
+		t.Errorf("payload base64 불일치: %q", p0.Payload)
 	}
 
 	// 정지

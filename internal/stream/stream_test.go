@@ -131,7 +131,7 @@ func TestHubNotRunning(t *testing.T) {
 
 // TestHubBackpressure는 느린 구독자의 이벤트가 드롭됨을 확인한다.
 func TestHubBackpressure(t *testing.T) {
-	hub := NewHub(testCameraSource{urls: map[string]string{"cam-1": "rtsp://127.0.0.1:1/stream"}}, fakeDialer(200))
+	hub := NewHub(testCameraSource{urls: map[string]string{"cam-1": "rtsp://127.0.0.1:1/stream"}}, fakeDialer(700))
 
 	if err := hub.Start("cam-1"); err != nil {
 		t.Fatal(err)

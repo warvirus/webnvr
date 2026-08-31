@@ -128,7 +128,7 @@ func main() {
 
 	typeCounter := map[uint8]int{}
 	packetCount := 0
-	keyframeTs := []uint32{}      // IDR이 포함된 프레임의 RTP 타임스탬프
+	keyframeTs := []uint32{} // IDR이 포함된 프레임의 RTP 타임스탬프
 	firstPayloadDump := 0
 	frameTs := uint32(0)
 	frameNals := map[uint8]bool{}

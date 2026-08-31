@@ -55,6 +55,17 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
           });
           break;
         }
+        case 'rtp_batch': {
+          // 고비트레이트 스트림: 여러 패킷을 한 메시지로 전달 (백엔드 확장)
+          if (msg.packets && msg.packets.length > 0) {
+            getWorkerInstance().postMessage({
+              type: 'packet_batch',
+              cameraId,
+              packets: msg.packets,
+            });
+          }
+          break;
+        }
         case 'stream_stopped': {
           getWorkerInstance().postMessage({type: 'detach', cameraId});
           set(s => {

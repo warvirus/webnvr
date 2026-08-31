@@ -30,6 +30,7 @@ export interface ServerMsg {
   type:
     | 'stream_started'
     | 'rtp_packet'
+    | 'rtp_batch'
     | 'stream_stopped'
     | 'stream_error'
     | 'camera_discovered'
@@ -55,6 +56,16 @@ export interface ServerMsg {
   timestamp?: number;
   marker?: boolean;
   sequence?: number;
+  // rtp_batch (고비트레이트 스트림 배치 전송 — 백엔드 확장)
+  packets?: RTPPacketItem[];
+}
+
+// rtp_batch의 개별 패킷 (축약 키)
+export interface RTPPacketItem {
+  p: string;      // base64 payload
+  ts: number;     // timestamp
+  m?: boolean;    // marker
+  sq: number;     // sequence
 }
 
 // 타일에 표시할 스트림 통계 (프론트엔드 워커에서 산출)

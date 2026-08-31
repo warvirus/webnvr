@@ -27,8 +27,8 @@ type handler struct {
 	h264f  *format.H264
 }
 
-func (h *handler) OnConnOpen(*gortsplib.ServerHandlerOnConnOpenCtx)    {}
-func (h *handler) OnConnClose(*gortsplib.ServerHandlerOnConnCloseCtx)  {}
+func (h *handler) OnConnOpen(*gortsplib.ServerHandlerOnConnOpenCtx)         {}
+func (h *handler) OnConnClose(*gortsplib.ServerHandlerOnConnCloseCtx)       {}
 func (h *handler) OnSessionOpen(*gortsplib.ServerHandlerOnSessionOpenCtx)   {}
 func (h *handler) OnSessionClose(*gortsplib.ServerHandlerOnSessionCloseCtx) {}
 

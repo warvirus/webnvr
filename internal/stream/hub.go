@@ -8,8 +8,10 @@ import (
 	"sync"
 )
 
-// subscriberBuf는 구독자 채널 버퍼 크기(프레임)다.
-const subscriberBuf = 30
+// subscriberBuf는 구독자 채널 버퍼 크기다.
+// 문서 의도는 "30프레임" 버퍼이며 RTP 패킷 단위로는 프레임당 30~40패킷이므로
+// 30패킷 버퍼는 1프레임 버스트에도 넘친다 → 프레임 기준 30프레임에 해당하는 크기 사용.
+const subscriberBuf = 512
 
 // CameraSource는 카메라 ID로 스트림 URL과 전송 방식을 제공한다.
 type CameraSource interface {
