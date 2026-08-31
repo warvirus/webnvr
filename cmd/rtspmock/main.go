@@ -48,22 +48,35 @@ func (h *handler) OnPlay(*gortsplib.ServerHandlerOnPlayCtx) (*base.Response, err
 			return
 		}
 		r := rand.New(rand.NewSource(time.Now().UnixNano()))
-		pkt := make([]byte, 1200)
-		for i := range pkt {
-			pkt[i] = byte(r.Intn(255))
+		idrBody := make([]byte, 40_000) // 1080p급 대형 IDR → FU-A 다중 단편
+		for i := range idrBody {
+			idrBody[i] = byte(r.Intn(255))
+		}
+		pBody := make([]byte, 3000)
+		for i := range pBody {
+			pBody[i] = byte(r.Intn(255))
 		}
 		tick := time.NewTicker(33 * time.Millisecond)
 		defer tick.Stop()
 		var ts int64
+		frameCount := 0
 		for range tick.C {
-			naluType := byte(1)
-			if ts%(90000/2) == 0 {
-				naluType = 5 // 0.5초마다 IDR
+			var nalus [][]byte
+			isIDR := frameCount%60 == 0 // 2초 간격 IDR (실제 카메라와 동일)
+			if isIDR {
+				nalus = [][]byte{append([]byte{5}, idrBody...)}
+			} else {
+				nalus = [][]byte{append([]byte{1}, pBody...)}
 			}
-			nalu := append([]byte{naluType}, pkt...)
-			pkts, err := enc.Encode([][]byte{nalu})
+			pkts, err := enc.Encode(nalus)
 			if err != nil || len(pkts) == 0 {
 				continue
+			}
+			if isIDR {
+				// 실제 카메라 패턴: IDR 프레임 앞에 STAP-A(SPS+PPS), 동일 타임스탬프
+				if stap, err := enc.Encode([][]byte{sampleSPS, samplePPS}); err == nil && len(stap) > 0 {
+					_ = h.stream.WritePacketRTP(h.medi, stap[0])
+				}
 			}
 			for _, p := range pkts {
 				if err := h.stream.WritePacketRTP(h.medi, p); err != nil {
@@ -71,6 +84,7 @@ func (h *handler) OnPlay(*gortsplib.ServerHandlerOnPlayCtx) (*base.Response, err
 				}
 			}
 			ts += 3000
+			frameCount++
 		}
 	}()
 	return &base.Response{StatusCode: base.StatusOK}, nil

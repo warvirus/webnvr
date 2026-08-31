@@ -24,7 +24,10 @@ interface CodecConfig {
 }
 
 const TICK_MS = 30;          // 큐 처리 주기 (지터 스무딩)
-const MAX_QUEUE = 150;       // 큐 상한 초과 시 가장 오래된 패킷 드롭
+// 큐 상한: WS 전송은 버스팅되므로(GOP 대기 없이도 수백 패킷이 몰려 도착),
+// 상한이 작으면 IDR의 머리 프래그먼트(STAP-A/S-프래그먼트)가 잘려 FU-A 재조립이
+// 영원히 실패한다. 1200 ≈ 880pps 기준 1.4초 버퍼(약 1.8MB).
+const MAX_QUEUE = 1200;
 const STATS_MS = 1000;
 
 const START_CODE = new Uint8Array([0, 0, 0, 1]);
@@ -416,9 +419,10 @@ class Session {
         const s = (payload[1] & 0x80) !== 0;
         const e = (payload[1] & 0x40) !== 0;
         const fuType = payload[1] & 0x1f;
-        const nalu = new Uint8Array((payload[0] & 0xe0) | fuType);
+        // 주의: new Uint8Array(숫자)는 "길이 n의 0 배열"을 만든다 — [값] 배열이 필요
+        const naluHeader = new Uint8Array([(payload[0] & 0xe0) | fuType]);
         if (s) {
-          this.fuBuf = concatBytes([nalu, payload.subarray(2)]);
+          this.fuBuf = concatBytes([naluHeader, payload.subarray(2)]);
           return null;
         }
         if (this.fuBuf === null) return null;
