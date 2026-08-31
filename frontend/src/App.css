@@ -531,6 +531,17 @@ input, select { font-family: inherit; }
 }
 .ptz-hint { color: var(--dim); font-size: 12px; }
 
+/* ── 통계 대시보드 ────────────────────────────────────────── */
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; margin-top: 12px; }
+.stats-card { border: 1px solid var(--line); border-radius: 6px; background: var(--ink); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.stats-head { display: flex; align-items: center; gap: 8px; }
+.stats-nums { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--dim); }
+.stats-nums b { color: var(--text); font-weight: 600; }
+.stats-drops { color: var(--rec); }
+
+/* ── 설정 페이지 ──────────────────────────────────────────── */
+.settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px 16px; margin-top: 12px; }
+
 /* ── 모션 접근성 ──────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }

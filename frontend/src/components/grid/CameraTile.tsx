@@ -110,9 +110,12 @@ export function CameraTile({camera, channel, state, stats, selected, active, onS
         {active && state === 'error' && (
           <div className="tile-idle tile-error-msg">
             <span>스트림 오류</span>
-            {onDismissError && (
-              <button className="btn" onClick={e => { e.stopPropagation(); onDismissError(); }}>확인</button>
-            )}
+            <div style={{display: 'flex', gap: 6}}>
+              <button className="btn" onClick={e => { e.stopPropagation(); startStream(camera.id); }}>재시도</button>
+              {onDismissError && (
+                <button className="btn btn-ghost" onClick={e => { e.stopPropagation(); onDismissError(); }}>확인</button>
+              )}
+            </div>
           </div>
         )}
       </div>

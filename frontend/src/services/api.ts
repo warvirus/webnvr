@@ -64,4 +64,18 @@ export const api = {
   cameraPresets: (id: string) => request<t.PresetDTO[]>('GET', `/api/cameras/${id}/presets`),
 
   cameraStreamURI: (id: string) => request<{uri: string}>('GET', `/api/cameras/${id}/stream-uri`),
+
+  // ── 설정/보안/백업 (doc 5.6) ──
+
+  appConfig: () => request<t.AppConfig>('GET', '/api/config'),
+
+  updateAppConfig: (cfg: t.AppConfig) =>
+    request<t.AppConfig>('PUT', '/api/config', cfg),
+
+  security: () => request<t.SecurityInfo>('GET', '/api/security'),
+
+  backup: () => request<t.BackupFile>('GET', '/api/backup'),
+
+  restoreBackup: (backup: t.BackupFile) =>
+    request<t.RestoreResult>('POST', '/api/backup/restore', backup),
 };

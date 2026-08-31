@@ -111,3 +111,39 @@ export interface HealthResponse {
   ok: boolean;
   version: number;
 }
+
+// ── 설정/보안/백업 (doc 5.6) ──
+
+export interface AppConfig {
+  version: number;
+  server: {ws_port: number; http_port: number};
+  stream: {
+    default_transport: string;
+    rtp_timeout_ms: number;
+    jitter_buffer_ms: number;
+    max_concurrent_streams: number;
+  };
+  discovery: {
+    scan_timeout_ms: number;
+    scan_interfaces: string[];
+    auto_scan_interval_min: number;
+  };
+  decoder: {prefer_hardware: boolean; max_threads: number};
+  logging: {level: string; file: string; max_size_mb: number; max_backups: number};
+}
+
+export interface SecurityInfo {
+  masterKeySource: string;
+}
+
+export interface BackupFile {
+  version: number;
+  exportedAt: string;
+  cameras: CameraDTO[];
+  appConfig?: AppConfig;
+}
+
+export interface RestoreResult {
+  ok: boolean;
+  restored: number;
+}

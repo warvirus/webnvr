@@ -1,6 +1,6 @@
 // 상단 헤더: 페이지 제목과 주요 동작 (모니터링 제어 포함 — doc 4.7)
 import React from 'react';
-import {IconPlus, IconPlay, IconStop} from '../common/Icons';
+import {IconPlus, IconPlay, IconStop, IconFull} from '../common/Icons';
 import {useUIStore} from '../../store/uiStore';
 import {GridMode} from '../../types';
 import {selectOrderedCameras, useCameraStore} from '../../store/cameraStore';
@@ -13,6 +13,15 @@ const GRID_OPTIONS: {value: GridMode; label: string}[] = [
   {value: 9, label: '3×3'},
   {value: 16, label: '4×4'},
 ];
+
+// toggleFullscreen은 모니터링 화면의 전체화면을 전환한다 (doc 5.3).
+function toggleFullscreen() {
+  if (document.fullscreenElement) {
+    void document.exitFullscreen();
+  } else {
+    void document.documentElement.requestFullscreen();
+  }
+}
 
 export function Toolbar() {
   const currentPage = useUIStore(s => s.currentPage);
@@ -31,6 +40,7 @@ export function Toolbar() {
   const titles: Record<string, {eyebrow: string; title: string}> = {
     monitoring: {eyebrow: 'Live Grid', title: '모니터링'},
     management: {eyebrow: 'Camera Registry', title: '카메라 등록부'},
+    settings: {eyebrow: 'Preferences', title: '설정'},
   };
   const t = titles[currentPage] ?? titles.management;
   const enabled = selectOrderedCameras(cameras).filter(c => c.enabled);
@@ -89,6 +99,9 @@ export function Toolbar() {
                 <IconPlay size={14}/> 전체 시작
               </button>
             )}
+            <button className="btn" title="전체화면 전환" onClick={toggleFullscreen}>
+              <IconFull size={14}/> 전체화면
+            </button>
           </div>
         </>
       )}

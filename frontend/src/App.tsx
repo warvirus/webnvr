@@ -4,6 +4,7 @@ import {Sidebar} from './components/layout/Sidebar';
 import {Toolbar} from './components/layout/Toolbar';
 import {StatusBar} from './components/layout/StatusBar';
 import {CameraManagementPage} from './pages/CameraManagementPage';
+import {SettingsPage} from './pages/SettingsPage';
 import {MonitoringPage} from './pages/MonitoringPage';
 import {useUIStore} from './store/uiStore';
 
@@ -28,7 +29,9 @@ export default function App() {
       <Sidebar/>
       <Toolbar/>
       <main className="main">
-        {currentPage === 'monitoring' ? <MonitoringPage/> : <CameraManagementPage/>}
+        {currentPage === 'monitoring' && <MonitoringPage/>}
+        {currentPage === 'management' && <CameraManagementPage/>}
+        {currentPage === 'settings' && <SettingsPage/>}
       </main>
       <StatusBar/>
       <div className="toasts" aria-live="polite">

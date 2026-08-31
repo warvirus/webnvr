@@ -4,10 +4,20 @@ import {wsService} from '../services/ws';
 import {StreamState, StreamStats} from '../types';
 import {getWorkerInstance} from '../workers/workerInstance';
 
+// 통계 히스토리 샘플 (스파크라인용)
+export interface StatSample {
+  fps: number;
+  kbps: number;
+}
+
+const STATS_HISTORY_MAX = 60; // 최근 60초
+
 interface StreamStoreState {
   // cameraId → 상태
   states: Record<string, StreamState>;
   stats: Record<string, StreamStats>;
+  // cameraId → 통계 히스토리 (스파크라인용)
+  history: Record<string, StatSample[]>;
   connected: boolean;
   lastError: string | null;
 
@@ -22,6 +32,7 @@ interface StreamStoreState {
 export const useStreamStore = create<StreamStoreState>((set, get) => ({
   states: {},
   stats: {},
+  history: {},
   connected: false,
   lastError: null,
 
@@ -71,9 +82,11 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
           set(s => {
             const states = {...s.states};
             const stats = {...s.stats};
+            const history = {...s.history};
             delete states[cameraId];
             delete stats[cameraId];
-            return {states, stats};
+            delete history[cameraId];
+            return {states, stats, history};
           });
           break;
         }
@@ -95,9 +108,18 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
           // 첫 프레임 디코딩 성공 → 오류 상태 해제 및 스트리밍 확정
           set(s => ({states: {...s.states, [msg.cameraId]: 'streaming'}, lastError: null}));
           break;
-        case 'stats':
-          set(s => ({stats: {...s.stats, [msg.cameraId]: msg.stats}}));
+        case 'stats': {
+          const st = msg.stats;
+          set(s => {
+            const hist = [...(s.history[msg.cameraId] ?? []), {fps: st.fps, kbps: st.kbps}];
+            if (hist.length > STATS_HISTORY_MAX) hist.splice(0, hist.length - STATS_HISTORY_MAX);
+            return {
+              stats: {...s.stats, [msg.cameraId]: st},
+              history: {...s.history, [msg.cameraId]: hist},
+            };
+          });
           break;
+        }
         case 'error':
           set(s => ({
             states: {...s.states, [msg.cameraId]: 'error'},
@@ -140,9 +162,11 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
     set(s => {
       const states = {...s.states};
       const stats = {...s.stats};
+      const history = {...s.history};
       delete states[cameraId];
       delete stats[cameraId];
-      return {states, stats};
+      delete history[cameraId];
+      return {states, stats, history};
     });
   },
 

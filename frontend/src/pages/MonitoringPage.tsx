@@ -3,6 +3,7 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {CameraGrid} from '../components/grid/CameraGrid';
 import {PTZControl} from '../components/grid/PTZControl';
+import {StatsPanel} from '../components/stats/StatsPanel';
 import {IconGrid} from '../components/common/Icons';
 import {useCameraStore} from '../store/cameraStore';
 import {useStreamStore} from '../store/streamStore';
@@ -73,6 +74,8 @@ export function MonitoringPage() {
         selectedId={selectedId}
         onSelect={id => setSelectedId(id === selectedId ? null : id)}
       />
+
+      <StatsPanel/>
 
       {streamingCount === 0 && (
         <div className="empty" style={{padding: '24px'}}>
