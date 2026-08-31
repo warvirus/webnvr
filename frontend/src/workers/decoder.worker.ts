@@ -1,4 +1,4 @@
-// 카메라별 RTP 수신 → Jitter 버퍼 → RFC 6184/7798 디페이저 → Annex B 조립 → WebCodecs 디코딩 워커
+// 카메라별 RTP 수신 → Jitter 버퍼 → RFC 6184/7798 디페이저 → EncodedVideoChunk 조립 → WebCodecs 디코딩 워커
 export {};
 
 // tsconfig가 DOM lib를 포함하므로 워커 컨텍스트를 로컬 타입으로 선언한다.
@@ -23,12 +23,18 @@ interface CodecConfig {
   clockRate: number;
 }
 
+// 디코더 포맷 후보 (Safari는 avcC description 필수, Chromium은 둘 다 허용)
+// AVCC   : description=avcC + 길이 접두어 청크 (권장 — 크로스 브라우저)
+// ANNEXB : description 없음 + 시작코드 청크 (Chromium 대안)
+const FORMAT_AVCC = 0;
+const FORMAT_ANNEXB = 1;
+const FORMAT_COUNT = 2;
+
 const TICK_MS = 30;          // 큐 처리 주기 (지터 스무딩)
-// 큐 상한: WS 전송은 버스팅되므로(GOP 대기 없이도 수백 패킷이 몰려 도착),
-// 상한이 작으면 IDR의 머리 프래그먼트(STAP-A/S-프래그먼트)가 잘려 FU-A 재조립이
-// 영원히 실패한다. 1200 ≈ 880pps 기준 1.4초 버퍼(약 1.8MB).
-const MAX_QUEUE = 1200;
+const MAX_QUEUE = 1200;      // 큐 상한 (버스트 흡수)
 const STATS_MS = 1000;
+const STALL_MS = 4_000;      // 키프레임 후 무출력 시 포맷 전환 대기
+const STALL_GIVEUP_MS = 12_000; // 모든 포맷 시도 후 포기
 
 const START_CODE = new Uint8Array([0, 0, 0, 1]);
 
@@ -90,6 +96,41 @@ function isParamSet(codec: 'h264' | 'h265', n: Uint8Array): boolean {
   return t === 32 || t === 33 || t === 34; // VPS/SPS/PPS
 }
 
+// buildAvcC는 SPS/PPS로 AVCDecoderConfigurationRecord를 만든다 (Safari 필수).
+function buildAvcC(sps: Uint8Array, pps: Uint8Array): Uint8Array {
+  const out: number[] = [];
+  out.push(1);                       // configurationVersion
+  out.push(sps[1]);                  // AVCProfileIndication
+  out.push(sps[2]);                  // profile_compatibility
+  out.push(sps[3]);                  // AVCLevelIndication
+  out.push(0xff);                    // lengthSizeMinusOne = 3 (4바이트 길이)
+  out.push(0xe1);                    // numOfSPS = 1
+  out.push((sps.length >> 8) & 0xff, sps.length & 0xff);
+  for (const b of sps) out.push(b);
+  out.push(1);                       // numOfPPS = 1
+  out.push((pps.length >> 8) & 0xff, pps.length & 0xff);
+  for (const b of pps) out.push(b);
+  return new Uint8Array(out);
+}
+
+// toAvcc는 NALU 목록을 4바이트 길이 접두어 청크로 변환한다.
+function toAvcc(nalus: Uint8Array[]): Uint8Array {
+  let total = 0;
+  for (const n of nalus) total += 4 + n.length;
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const n of nalus) {
+    const len = n.length;
+    out[off] = (len >>> 24) & 0xff;
+    out[off + 1] = (len >>> 16) & 0xff;
+    out[off + 2] = (len >>> 8) & 0xff;
+    out[off + 3] = len & 0xff;
+    out.set(n, off + 4);
+    off += 4 + len;
+  }
+  return out;
+}
+
 // ───────────────────────────────────────────────────────────
 
 // Session은 카메라 하나의 디코딩 파이프라인이다.
@@ -98,7 +139,7 @@ class Session {
   cameraId: string;
   config: CodecConfig | null = null;
   decoder: VideoDecoder | null = null;
-  candidateIdx = 0;
+  formatIdx = FORMAT_AVCC;   // 현재 시도 중인 청크 포맷
   sawKeyframe = false;
 
   queue: PacketIn[] = [];
@@ -122,6 +163,7 @@ class Session {
   drops = 0;
   diagSent = false;
   firstPacketMs = 0;
+  firstKeyMs = 0;
   lastError = '';
 
   // 통계
@@ -149,7 +191,7 @@ class Session {
     return this.ensureDecoder();
   }
 
-  // ensureDecoder는 디코더를 동기적으로 준비한다. 실패한 코덱 문자열은 순차 폴백한다.
+  // ensureDecoder는 현재 포맷 후보로 디코더를 동기적으로 준비한다.
   private ensureDecoder(): boolean {
     if (this.decoder && this.decoder.state === 'configured') return true;
     if (this.decoder) {
@@ -164,58 +206,64 @@ class Session {
     if (!sps || !pps || sps.length === 0 || pps.length === 0) return false;
     if (this.config.codec === 'h264' && sps.length < 4) return false;
 
-    const candidates = this.config.codec === 'h264'
-      ? [h264CodecString(sps), 'avc1.64001f', 'avc1.42E01E']
-      : ['hev1.1.6.L93.B0', 'hev1.1.6.L120.90'];
+    const codecStr = this.config.codec === 'h264'
+      ? h264CodecString(sps)
+      : 'hev1.1.6.L93.B0';
 
-    // 실패한 후보는 건너뛴다
-    while (this.candidateIdx < candidates.length) {
-      const codecStr = candidates[this.candidateIdx];
-      const attempt = (hw: boolean): VideoDecoder | null => {
-        try {
-          const dec = new VideoDecoder({
-            output: (frame: VideoFrame) => {
-              ctx.postMessage({type: 'frame', cameraId: this.cameraId, frame}, [frame]);
-            },
-            error: (e: DOMException) => {
-              this.lastError = `디코더 오류: ${e.message}`;
-              this.decoder = null;
-            },
-          });
-          const cfg: VideoDecoderConfig = {
-            codec: codecStr,
-            optimizeForLatency: true,
-          };
-          if (hw) cfg.hardwareAcceleration = 'prefer-hardware';
-          dec.configure(cfg);
-          return dec;
-        } catch (e) {
-          // 동기 설정 실패 → 다음 시도
-          try {
-            void e;
-          } catch { /* 무시 */ }
-          return null;
-        }
+    // 포맷 후보별 설정: AVCC(description 포함) → AnnexB(description 없음)
+    const buildConfig = (format: number): VideoDecoderConfig => {
+      const cfg: VideoDecoderConfig = {
+        codec: codecStr,
+        optimizeForLatency: true,
       };
-
-      let dec = attempt(true);
-      if (dec === null) dec = attempt(false); // 하드웨어 선호 실패 시 소프트웨어
-      if (dec !== null) {
-        this.decoder = dec;
-        return true;
+      if (format === FORMAT_AVCC && this.config!.codec === 'h264') {
+        cfg.description = buildAvcC(sps!, pps!);
       }
-      this.candidateIdx++;
-    }
+      return cfg;
+    };
 
-    if (this.candidateIdx >= candidates.length && !this.diagSent) {
-      this.diagSent = true;
-      ctx.postMessage({
-        type: 'error',
-        cameraId: this.cameraId,
-        message: `이 환경에서 ${this.config.codec} 디코더 설정에 실패했습니다 (WebCodecs 미지원 가능)`,
-      });
+    const attempt = (format: number, hw: boolean): VideoDecoder | null => {
+      try {
+        const dec = new VideoDecoder({
+          output: (frame: VideoFrame) => {
+            ctx.postMessage({type: 'frame', cameraId: this.cameraId, frame}, [frame]);
+          },
+          error: (e: DOMException) => {
+            this.lastError = `디코더 오류: ${e.message}`;
+            // 비동기 오류는 포맷 후보 전환 트리거
+            this.advanceFormat();
+          },
+        });
+        const cfg = buildConfig(format);
+        if (hw) cfg.hardwareAcceleration = 'prefer-hardware';
+        dec.configure(cfg);
+        return dec;
+      } catch {
+        return null; // 동기 설정 실패
+      }
+    };
+
+    let dec = attempt(this.formatIdx, true);
+    if (dec === null) dec = attempt(this.formatIdx, false); // 하드웨어 선호 실패 시 소프트웨어
+    if (dec !== null) {
+      this.decoder = dec;
+      return true;
     }
     return false;
+  }
+
+  // advanceFormat은 다음 청크 포맷 후보로 전환한다. (Safari/Chromium 호환성 자동 대응)
+  private advanceFormat(): boolean {
+    if (this.formatIdx + 1 >= FORMAT_COUNT) return false;
+    this.formatIdx++;
+    try {
+      this.decoder?.close();
+    } catch { /* 무시 */ }
+    this.decoder = null;
+    this.sawKeyframe = false; // 새 포맷에서 키프레임부터 다시 시작
+    this.firstKeyMs = 0;
+    this.heldKey = null;
+    return true;
   }
 
   // push는 패킷을 큐에 시퀀스 순으로 삽입한다.
@@ -245,29 +293,45 @@ class Session {
     this.watchdog();
   }
 
-  // watchdog는 장기간 프레임이 없는 경우에만 오류를 발행한다.
-  // 실제 카메라는 참여 시점부터 첫 키프레임까지 GOP(2~10초)를 기다려야 하므로
-  // 패킷 수 기준 판정은 오판을 유발한다 — 시간 기준으로 판정한다.
+  // watchdog는 정체 상태를 감시하고 포맷 전환/오류 보고를 수행한다.
   private watchdog() {
-    if (this.diagSent || this.frames > 0) return;
+    if (this.frames > 0) return; // 정상 출력 중
     if (this.firstPacketMs === 0) this.firstPacketMs = performance.now();
-    const elapsed = performance.now() - this.firstPacketMs;
+    if (this.sawKeyframe && this.firstKeyMs === 0) this.firstKeyMs = performance.now();
     if (this.packets < 10) return;
+    const now = performance.now();
 
-    if (this.sawKeyframe && elapsed > 8_000) {
-      this.diagSent = true;
-      ctx.postMessage({
-        type: 'error',
-        cameraId: this.cameraId,
-        message: '키프레임 이후에도 8초간 프레임이 디코딩되지 않았습니다',
-      });
-    } else if (!this.sawKeyframe && elapsed > 20_000) {
-      this.diagSent = true;
-      ctx.postMessage({
-        type: 'error',
-        cameraId: this.cameraId,
-        message: '20초간 키프레임을 수신하지 못했습니다 — 카메라의 GOP(키 프레임 간격) 설정을 확인하세요',
-      });
+    // 키프레임 이후 무출력 → 다른 청크 포맷으로 전환 (Safari avcC 필수 이슈 대응)
+    if (this.sawKeyframe && now - this.firstKeyMs > STALL_MS) {
+      if (this.advanceFormat()) {
+        ctx.postMessage({
+          type: 'error',
+          cameraId: this.cameraId,
+          message: `디코딩 출력이 없어 청크 포맷을 전환했습니다 (${this.formatIdx === FORMAT_ANNEXB ? 'Annex B' : 'AVCC'})`,
+        });
+        return;
+      }
+      if (!this.diagSent && now - this.firstKeyMs > STALL_GIVEUP_MS) {
+        this.diagSent = true;
+        ctx.postMessage({
+          type: 'error',
+          cameraId: this.cameraId,
+          message: `키프레임 이후 ${STALL_GIVEUP_MS / 1000}초간 프레임이 출력되지 않았습니다 (이 환경의 WebCodecs가 ${this.config?.codec} 디코딩을 지원하지 않는 것으로 보임)`,
+        });
+      }
+      return;
+    }
+
+    // 키프레임 자체가 안 오는 경우 (모든 포맷과 무관 — 카메라 GOP 확인 필요)
+    if (!this.sawKeyframe && now - this.firstPacketMs > 20_000) {
+      if (!this.diagSent) {
+        this.diagSent = true;
+        ctx.postMessage({
+          type: 'error',
+          cameraId: this.cameraId,
+          message: '20초간 키프레임을 수신하지 못했습니다 — 카메라의 GOP(키 프레임 간격) 설정을 확인하세요',
+        });
+      }
     }
   }
 
@@ -292,10 +356,9 @@ class Session {
     if (p.marker) this.completeFrame();
   }
 
-  // completeFrame은 누적 NALU를 즉시 Annex B로 조립해 디코더에 넣는다 (동기, 레이스 없음)
+  // completeFrame은 누적 NALU를 현재 포맷 청크로 조립해 디코더에 넣는다 (동기, 레이스 없음)
   private completeFrame() {
     if (this.frameNalus.length === 0) return;
-    const codec = this.config?.codec ?? 'h264';
     const isKey = this.frameIsKey;
     this.frameIsKey = false;
     const nalus = this.frameNalus;
@@ -330,22 +393,28 @@ class Session {
     this.decodeFrame(nalus, ts, isKey);
   }
 
-  // decodeFrame은 NALU 목록을 Annex B 청크로 만들어 디코더에 넣는다.
+  // decodeFrame은 NALU 목록을 현재 포맷의 청크로 만들어 디코더에 넣는다.
   private decodeFrame(nalus: Uint8Array[], ts: number, isKey: boolean) {
     if (!this.decoder || this.decoder.state !== 'configured') {
       this.drops++;
       return;
     }
-    const parts: Uint8Array[] = [];
-    if (isKey) {
-      // 키프레임 앞에 파라미터 셋을 삽입한다
-      const {sps, pps, vps} = this.paramSets();
-      if (vps) parts.push(START_CODE, vps);
-      if (sps) parts.push(START_CODE, sps);
-      if (pps) parts.push(START_CODE, pps);
+    let data: Uint8Array;
+    if (this.formatIdx === FORMAT_AVCC) {
+      // AVCC: 길이 접두어 (파라미터 셋은 description에 포함)
+      data = toAvcc(nalus);
+    } else {
+      // Annex B: 키프레임 앞에 파라미터 셋 삽입
+      const parts: Uint8Array[] = [];
+      if (isKey) {
+        const {sps, pps, vps} = this.paramSets();
+        if (vps) parts.push(START_CODE, vps);
+        if (sps) parts.push(START_CODE, sps);
+        if (pps) parts.push(START_CODE, pps);
+      }
+      for (const n of nalus) parts.push(START_CODE, n);
+      data = concatBytes(parts);
     }
-    for (const n of nalus) parts.push(START_CODE, n);
-    const data = concatBytes(parts);
 
     const clockRate = this.config?.clockRate ?? 90000;
     const chunk = new EncodedVideoChunk({
@@ -361,20 +430,11 @@ class Session {
     try {
       this.decoder.decode(chunk);
     } catch (e) {
-      // 디코더 상태 이상 → 재설정 후 다음 키프레임에서 재시작
+      // 디코더 상태 이상 → 포맷 전환 후 다음 키프레임에서 재시작
       this.lastError = `디코딩 실패: ${String(e)}`;
-      this.configuredReset();
+      this.advanceFormat();
       this.drops++;
     }
-  }
-
-  private configuredReset() {
-    try {
-      this.decoder?.close();
-    } catch { /* 무시 */ }
-    this.decoder = null;
-    this.sawKeyframe = false;
-    this.candidateIdx = 0;
   }
 
   // collectParamSet은 스트림에서 SPS/PPS/VPS를 수집한다.
