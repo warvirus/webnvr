@@ -1,6 +1,6 @@
 // 카메라 추가/수정 폼 — 타입별 필드 동적 표시와 유효성 검증
 import React, {useMemo, useState} from 'react';
-import {api} from '../../../wailsjs/go/models';
+import {CameraDTO, TestDirectStreamRequest, TestONVIFRequest} from '../../types/api';
 import {ConnectionTest, TestState} from './ConnectionTest';
 import {ProfileSelector} from './ProfileSelector';
 import {useCameraStore} from '../../store/cameraStore';
@@ -20,7 +20,8 @@ export interface CameraFormValue {
 
 interface Props {
   mode: 'add' | 'edit';
-  initial?: api.CameraDTO | null;
+  cameraId?: string; // edit 모드: 등록된 카메라의 저장 자격증명으로 프로필/URI 조회
+  initial?: CameraDTO | null;
   presetXAddr?: string;
   onSubmit: (value: CameraFormValue) => Promise<void>;
   onCancel: () => void;
@@ -34,10 +35,10 @@ const TYPE_LABELS: [string, string][] = [
 ];
 
 // CameraForm은 카메라 타입에 따라 필요한 필드만 보여준다.
-export function CameraForm({mode, initial, presetXAddr, onSubmit, onCancel}: Props) {
+export function CameraForm({mode, cameraId, initial, presetXAddr, onSubmit, onCancel}: Props) {
   const testONVIF = useCameraStore(s => s.testONVIF);
   const testDirectStream = useCameraStore(s => s.testDirectStream);
-  const getStreamURI = useCameraStore(s => s.getStreamURI);
+  const getCameraStreamURI = useCameraStore(s => s.getCameraStreamURI);
 
   const [value, setValue] = useState<CameraFormValue>({
     name: initial?.name ?? '',
@@ -96,9 +97,10 @@ export function CameraForm({mode, initial, presetXAddr, onSubmit, onCancel}: Pro
     if (isONVIF) {
       setTest({kind: 'testing'});
       try {
-        const res = await testONVIF(new api.TestONVIFRequest({
+        const req: TestONVIFRequest = {
           xaddr: value.xaddr.trim(), username: value.username, password: value.password,
-        }));
+        };
+        const res = await testONVIF(req);
         setTest(res.ok ? {kind: 'onvif-ok', res} : {kind: 'fail', message: res.error || '원인을 알 수 없습니다.'});
       } catch (e) {
         setTest({kind: 'fail', message: String(e)});
@@ -106,7 +108,8 @@ export function CameraForm({mode, initial, presetXAddr, onSubmit, onCancel}: Pro
     } else {
       setTest({kind: 'testing'});
       try {
-        const res = await testDirectStream(new api.TestDirectStreamRequest({url: value.streamUrl.trim(), timeoutMs: 3000}));
+        const req: TestDirectStreamRequest = {url: value.streamUrl.trim(), timeoutMs: 3000};
+        const res = await testDirectStream(req);
         setTest(res.ok ? {kind: 'direct-ok'} : {kind: 'fail', message: res.error || '원인을 알 수 없습니다.'});
       } catch (e) {
         setTest({kind: 'fail', message: String(e)});
@@ -126,14 +129,12 @@ export function CameraForm({mode, initial, presetXAddr, onSubmit, onCancel}: Pro
     }
   }
 
-  // 편집 모드에서 스트림 URI 미리보기 (ONVIF)
+  // 편집 모드에서 스트림 URI 미리보기 (저장 자격증명 사용 — 비밀번호 재입력 불필요)
   async function previewURI() {
+    if (!cameraId) return;
     try {
-      const uri = await getStreamURI(new api.GetStreamURIRequest({
-        xaddr: value.xaddr.trim(), username: value.username, password: value.password,
-        profileToken: value.profileToken, protocol: 'RTSP',
-      }));
-      setTest({kind: 'onvif-ok', res: new api.TestONVIFResponse({ok: true, manufacturer: '스트림 URI', model: uri, firmware: ''})});
+      const uri = await getCameraStreamURI(cameraId);
+      setTest({kind: 'onvif-ok', res: {ok: true, error: '', manufacturer: '스트림 URI', model: uri, firmware: ''}});
     } catch (e) {
       setTest({kind: 'fail', message: String(e)});
     }
@@ -181,6 +182,7 @@ export function CameraForm({mode, initial, presetXAddr, onSubmit, onCancel}: Pro
             </div>
           </div>
           <ProfileSelector
+            cameraId={mode === 'edit' ? cameraId : undefined}
             xaddr={value.xaddr.trim()}
             username={value.username}
             password={value.password}

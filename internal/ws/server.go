@@ -36,15 +36,27 @@ func NewServer(ctrl Controller, addr string) *Server {
 	return &Server{ctrl: ctrl, addr: addr, conns: map[*connState]struct{}{}}
 }
 
+// Mux는 업그레이드 엔드포인트(/ws)를 등록한 mux를 반환한다.
+// 추가 라우트(예: /api/*)는 호출자가 같은 mux에 등록해 하나의 포트로 제공한다.
+func (s *Server) Mux() http.Handler {
+	return s.mux()
+}
+
 // Start는 서버를 시작한다. (비블로킹)
 func (s *Server) Start() error {
+	return s.StartWithHandler(s.mux())
+}
+
+// StartWithHandler는 지정 핸들러로 서버를 시작한다. (비블로킹)
+// 호출자가 /ws 외의 추가 라우트(예: /api/*)를 mux에 등록해 사용할 수 있다.
+func (s *Server) StartWithHandler(h http.Handler) error {
 	ln, err := net.Listen("tcp", s.addr)
 	if err != nil {
 		return fmt.Errorf("WS 서버 포트 바인딩 실패 (%s): %w", s.addr, err)
 	}
 	s.mu.Lock()
 	s.ln = ln
-	s.http = &http.Server{Handler: s.mux()}
+	s.http = &http.Server{Handler: h}
 	s.mu.Unlock()
 
 	go func() {
@@ -52,7 +64,7 @@ func (s *Server) Start() error {
 			slog.Error("WS 서버 오류", "err", err)
 		}
 	}()
-	slog.Info("WS 서버 시작", "addr", ln.Addr().String())
+	slog.Info("HTTP/WS 서버 시작", "addr", ln.Addr().String())
 	return nil
 }
 

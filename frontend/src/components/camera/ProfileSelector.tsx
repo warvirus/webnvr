@@ -1,10 +1,12 @@
 // ONVIF 프로필 자동 조회 후 선택하는 드롭다운 컴포넌트
+// 등록된 카메라(카메라 ID)는 저장 자격증명으로, 미등록 카메라는 입력 자격증명으로 조회한다.
 import React, {useState} from 'react';
-import {api} from '../../../wailsjs/go/models';
+import {ProfileDTO} from '../../types/api';
 import {useCameraStore} from '../../store/cameraStore';
 import {useUIStore} from '../../store/uiStore';
 
 interface Props {
+  cameraId?: string; // 편집(등록된 카메라)일 때 지정
   xaddr: string;
   username: string;
   password: string;
@@ -13,16 +15,19 @@ interface Props {
 }
 
 // ProfileSelector는 카메라의 미디어 프로필을 조회해 목록에서 선택받는다.
-export function ProfileSelector({xaddr, username, password, selected, onSelect}: Props) {
+export function ProfileSelector({cameraId, xaddr, username, password, selected, onSelect}: Props) {
   const getProfiles = useCameraStore(s => s.getProfiles);
+  const getCameraProfiles = useCameraStore(s => s.getCameraProfiles);
   const pushToast = useUIStore(s => s.pushToast);
-  const [profiles, setProfiles] = useState<api.ProfileDTO[] | null>(null);
+  const [profiles, setProfiles] = useState<ProfileDTO[] | null>(null);
   const [loading, setLoading] = useState(false);
 
   async function load() {
     setLoading(true);
     try {
-      const list = await getProfiles(new api.GetProfilesRequest({xaddr, username, password}));
+      const list = cameraId
+        ? await getCameraProfiles(cameraId)
+        : await getProfiles({xaddr, username, password});
       setProfiles(list);
       if (list.length === 0) {
         pushToast('error', '카메라가 제공하는 프로필이 없습니다. 카메라 설정을 확인하세요.');

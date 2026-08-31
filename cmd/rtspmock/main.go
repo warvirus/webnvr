@@ -68,15 +68,16 @@ func (h *handler) OnPlay(*gortsplib.ServerHandlerOnPlayCtx) (*base.Response, err
 			} else {
 				nalus = [][]byte{append([]byte{1}, pBody...)}
 			}
-			pkts, err := enc.Encode(nalus)
-			if err != nil || len(pkts) == 0 {
-				continue
-			}
 			if isIDR {
-				// 실제 카메라 패턴: IDR 프레임 앞에 STAP-A(SPS+PPS), 동일 타임스탬프
+				// 실제 카메라 패턴: IDR 프레임 앞에 STAP-A(SPS+PPS)를 먼저 인코딩/전송한다.
+				// (순서를 바꾸면 시퀀스가 역행해 수신 측에서 대규모 유실로 오판된다)
 				if stap, err := enc.Encode([][]byte{sampleSPS, samplePPS}); err == nil && len(stap) > 0 {
 					_ = h.stream.WritePacketRTP(h.medi, stap[0])
 				}
+			}
+			pkts, err := enc.Encode(nalus)
+			if err != nil || len(pkts) == 0 {
+				continue
 			}
 			for _, p := range pkts {
 				if err := h.stream.WritePacketRTP(h.medi, p); err != nil {

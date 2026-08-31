@@ -1,13 +1,13 @@
 // 모니터링 카메라 그리드 — 레이아웃 모드에 따라 스트리밍 카메라를 배치한다
 import React from 'react';
-import {api} from '../../../wailsjs/go/models';
+import {CameraDTO} from '../../types/api';
 import {GridMode, StreamState, StreamStats} from '../../types';
 import {CameraTile} from './CameraTile';
 import {selectOrderedCameras} from '../../store/cameraStore';
 import {useUIStore} from '../../store/uiStore';
 
 interface Props {
-  cameras: api.CameraDTO[];
+  cameras: CameraDTO[];
   states: Record<string, StreamState>;
   stats: Record<string, StreamStats>;
   selectedId: string | null;

@@ -18,7 +18,7 @@ import {
   sortableKeyboardCoordinates,
 } from '@dnd-kit/sortable';
 import {CSS} from '@dnd-kit/utilities';
-import {api} from '../../../wailsjs/go/models';
+import {CameraDTO} from '../../types/api';
 import {selectOrderedCameras, useCameraStore} from '../../store/cameraStore';
 import {useUIStore} from '../../store/uiStore';
 import {IconCamera, IconEdit, IconGrip, IconTrash} from '../common/Icons';
@@ -79,7 +79,7 @@ export function CameraList() {
 }
 
 // CameraCard는 단일 채널 카드다. 채널 번호는 layoutOrder에서 온다.
-function CameraCard({camera, channel, dimmed}: {camera: api.CameraDTO; channel: number; dimmed: boolean}) {
+function CameraCard({camera, channel, dimmed}: {camera: CameraDTO; channel: number; dimmed: boolean}) {
   const {updateCamera, deleteCamera} = useCameraStore();
   const {pushToast, openCameraModal} = useUIStore();
   const [confirming, setConfirming] = useState(false);
@@ -87,7 +87,7 @@ function CameraCard({camera, channel, dimmed}: {camera: api.CameraDTO; channel: 
 
   async function toggleEnabled() {
     try {
-      await updateCamera(camera.id, new api.UpdateCameraRequest({enabled: !camera.enabled}));
+      await updateCamera(camera.id, {enabled: !camera.enabled});
     } catch (e) {
       pushToast('error', `상태 변경 실패: ${String(e)}`);
     }

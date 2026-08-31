@@ -4,6 +4,7 @@ package api
 import (
 	"fmt"
 	"log/slog"
+	"net/http"
 
 	"webnvr/internal/camera"
 	"webnvr/internal/config"
@@ -39,10 +40,16 @@ func New(configDir string) (*App, error) {
 	}, nil
 }
 
-// StartWSServer는 로컬호스트에 WebSocket 서버를 시작한다.
+// StartWSServer는 로컬호스트(:8080)에 HTTP/WS 서버를 시작한다.
+// mux: /ws(스트림 중계) + /api/*(REST, v1.1). 포트 충돌 시 오류를 반환한다.
 func (a *App) StartWSServer() error {
 	a.wsServer = ws.NewServer(a.Stream, fmt.Sprintf("127.0.0.1:%d", a.Camera.appCfg.Server.WSPort))
-	if err := a.wsServer.Start(); err != nil {
+
+	mux := http.NewServeMux()
+	mux.Handle("/ws", a.wsServer.Mux())
+	RegisterHTTP(mux, a)
+
+	if err := a.wsServer.StartWithHandler(CORS(mux)); err != nil {
 		return err
 	}
 	return nil

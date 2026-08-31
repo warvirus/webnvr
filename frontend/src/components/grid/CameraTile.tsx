@@ -1,6 +1,6 @@
 // 단일 카메라 타일 — 캔버스 렌더링 + OSD 오버레이 + 통계 표시
 import React, {useEffect, useMemo, useRef, useState} from 'react';
-import {api} from '../../../wailsjs/go/models';
+import {CameraDTO} from '../../types/api';
 import {StreamState, StreamStats} from '../../types';
 import {VideoRenderer} from './VideoRenderer';
 import {IconCamera, IconPlay} from '../common/Icons';
@@ -13,7 +13,7 @@ interface FrameMsg {
 }
 
 interface Props {
-  camera: api.CameraDTO;
+  camera: CameraDTO;
   channel: number;
   state: StreamState;
   stats?: StreamStats;

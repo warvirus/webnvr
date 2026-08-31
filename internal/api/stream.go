@@ -69,29 +69,10 @@ func (s *StreamService) StreamURL(cameraID string) (string, string, error) {
 	}
 }
 
-// withONVIFClient는 카메라용 ONVIF 클라이언트(비밀번호 복호화 포함)를 만들고
-// 프로필 토큰을 확정해 콜백을 실행한다.
+// withONVIFClient는 카메라 저장 자격증명으로 ONVIF 클라이언트를 준비해 콜백을 실행한다.
+// (onvifCall 공용 헬퍼의 위임)
 func (s *StreamService) withONVIFClient(cam *camera.Camera, fn func(cli *onvif.Client, profile string) (string, error)) (string, error) {
-	pass, err := s.mgr.PasswordOf(cam)
-	if err != nil {
-		return "", fmt.Errorf("비밀번호 복호화 실패: %w", err)
-	}
-	cli, err := onvif.New(cam.XAddr, cam.Username, pass)
-	if err != nil {
-		return "", err
-	}
-	profile := cam.ProfileToken
-	if profile == "" {
-		profiles, err := cli.Profiles(context.Background())
-		if err != nil {
-			return "", fmt.Errorf("프로필 조회 실패: %w", err)
-		}
-		if len(profiles) == 0 {
-			return "", fmt.Errorf("사용 가능한 프로필이 없음")
-		}
-		profile = profiles[0].Token
-	}
-	return fn(cli, profile)
+	return onvifCall(s.mgr, cam.ID, fn)
 }
 
 func (s *StreamService) cachedURI(id string) (string, bool) {

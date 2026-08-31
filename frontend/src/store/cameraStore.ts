@@ -1,38 +1,40 @@
-// 카메라 목록 상태와 백엔드 바인딩 호출(낙관적 업데이트 + 롤백)을 관리하는 스토어
+// 카메라 목록 상태와 백엔드 HTTP API 호출(낙관적 업데이트 + 롤백)을 관리하는 스토어
 import {create} from 'zustand';
+import {api} from '../services/api';
 import {
-  CreateCamera,
-  DeleteCamera,
-  DiscoverONVIFCameras,
-  GetCameraPresets,
-  GetONVIFProfiles,
-  GetONVIFStreamURI,
-  ListCameras,
-  ReorderCameras,
-  TestDirectStream,
-  TestONVIFCamera,
-  UpdateCamera,
-} from '../../wailsjs/go/api/CameraService';
-import {api, camera} from '../../wailsjs/go/models';
+  CameraDTO,
+  CreateCameraRequest,
+  DiscoveredCamera,
+  GetProfilesRequest,
+  PresetDTO,
+  ProfileDTO,
+  StreamConfig,
+  TestDirectStreamRequest,
+  TestDirectStreamResponse,
+  TestONVIFRequest,
+  TestONVIFResponse,
+  UpdateCameraRequest,
+} from '../types/api';
 
 interface CameraState {
-  cameras: api.CameraDTO[];
+  cameras: CameraDTO[];
   loaded: boolean;
-  discovered: api.DiscoveredCamera[];
+  discovered: DiscoveredCamera[];
   isDiscovering: boolean;
   isBusy: boolean; // 목록 수준 동작(생성/재정렬 등) 진행 표시
 
   fetchCameras: () => Promise<void>;
   discover: () => Promise<void>;
-  addCamera: (req: api.CreateCameraRequest) => Promise<api.CameraDTO | null>;
-  updateCamera: (id: string, req: api.UpdateCameraRequest) => Promise<boolean>;
+  addCamera: (req: CreateCameraRequest) => Promise<CameraDTO | null>;
+  updateCamera: (id: string, req: UpdateCameraRequest) => Promise<boolean>;
   deleteCamera: (id: string) => Promise<boolean>;
   reorderCameras: (orderedIds: string[]) => Promise<void>;
-  testONVIF: (req: api.TestONVIFRequest) => Promise<api.TestONVIFResponse>;
-  testDirectStream: (req: api.TestDirectStreamRequest) => Promise<api.TestDirectStreamResponse>;
-  getProfiles: (req: api.GetProfilesRequest) => Promise<api.ProfileDTO[]>;
-  getStreamURI: (req: api.GetStreamURIRequest) => Promise<string>;
-  getCameraPresets: (cameraId: string) => Promise<api.PresetDTO[]>;
+  testONVIF: (req: TestONVIFRequest) => Promise<TestONVIFResponse>;
+  testDirectStream: (req: TestDirectStreamRequest) => Promise<TestDirectStreamResponse>;
+  getProfiles: (req: GetProfilesRequest) => Promise<ProfileDTO[]>;
+  getCameraProfiles: (cameraId: string) => Promise<ProfileDTO[]>;
+  getCameraStreamURI: (cameraId: string) => Promise<string>;
+  getCameraPresets: (cameraId: string) => Promise<PresetDTO[]>;
 }
 
 export const useCameraStore = create<CameraState>((set, get) => ({
@@ -43,19 +45,14 @@ export const useCameraStore = create<CameraState>((set, get) => ({
   isBusy: false,
 
   fetchCameras: async () => {
-    try {
-      const cams = await ListCameras();
-      set({cameras: cams, loaded: true});
-    } catch (e) {
-      set({loaded: true});
-      throw e;
-    }
+    const cams = await api.listCameras();
+    set({cameras: cams, loaded: true});
   },
 
   discover: async () => {
     set({isDiscovering: true, discovered: []});
     try {
-      const found = await DiscoverONVIFCameras();
+      const found = await api.discover();
       set({discovered: found});
     } finally {
       set({isDiscovering: false});
@@ -65,7 +62,7 @@ export const useCameraStore = create<CameraState>((set, get) => ({
   addCamera: async (req) => {
     set({isBusy: true});
     try {
-      const saved = await CreateCamera(req);
+      const saved = await api.createCamera(req);
       set({cameras: [...get().cameras, saved]});
       return saved;
     } finally {
@@ -76,7 +73,7 @@ export const useCameraStore = create<CameraState>((set, get) => ({
   updateCamera: async (id, req) => {
     const prev = get().cameras;
     // 낙관적 업데이트: 요청 필드를 즉시 반영하고, 실패하면 롤백한다
-    const patch: Record<string, unknown> = {};
+    const patch: Partial<CameraDTO> = {};
     if (req.name != null) patch.name = req.name;
     if (req.xaddr != null) patch.xaddr = req.xaddr;
     if (req.username != null) patch.username = req.username;
@@ -89,10 +86,10 @@ export const useCameraStore = create<CameraState>((set, get) => ({
     if (req.password != null) patch.hasPassword = true;
 
     set({
-      cameras: prev.map(c => c.id === id ? new api.CameraDTO({...c, ...patch}) : c),
+      cameras: prev.map(c => c.id === id ? {...c, ...patch} : c),
     });
     try {
-      const saved = await UpdateCamera(id, req);
+      const saved = await api.updateCamera(id, req);
       set({cameras: get().cameras.map(c => c.id === id ? saved : c)});
       return true;
     } catch (e) {
@@ -105,7 +102,7 @@ export const useCameraStore = create<CameraState>((set, get) => ({
     const prev = get().cameras;
     set({cameras: prev.filter(c => c.id !== id)});
     try {
-      await DeleteCamera(id);
+      await api.deleteCamera(id);
       return true;
     } catch (e) {
       set({cameras: prev}); // 롤백
@@ -121,29 +118,30 @@ export const useCameraStore = create<CameraState>((set, get) => ({
         const c = byId.get(id);
         return c ? {...c, layoutOrder: i} : null;
       })
-      .filter((c): c is api.CameraDTO => c !== null);
+      .filter((c): c is CameraDTO => c !== null);
     set({cameras: reordered});
     try {
-      await ReorderCameras(orderedIds);
+      await api.reorderCameras(orderedIds);
     } catch (e) {
       set({cameras: prev}); // 롤백
       throw e;
     }
   },
 
-  testONVIF: (req) => TestONVIFCamera(req),
-  testDirectStream: (req) => TestDirectStream(req),
-  getProfiles: (req) => GetONVIFProfiles(req),
-  getStreamURI: (req) => GetONVIFStreamURI(req),
-  getCameraPresets: (cameraId) => GetCameraPresets(cameraId),
+  testONVIF: (req) => api.testONVIF(req),
+  testDirectStream: (req) => api.testDirectStream(req),
+  getProfiles: (req) => api.onvifProfiles(req),
+  getCameraProfiles: (cameraId) => api.cameraProfiles(cameraId),
+  getCameraStreamURI: (cameraId) => api.cameraStreamURI(cameraId).then(r => r.uri),
+  getCameraPresets: (cameraId) => api.cameraPresets(cameraId),
 }));
 
 // 카메라를 layout_order 순으로 정렬해 반환하는 셀렉터
-export function selectOrderedCameras(cameras: api.CameraDTO[]): api.CameraDTO[] {
+export function selectOrderedCameras(cameras: CameraDTO[]): CameraDTO[] {
   return [...cameras].sort((a, b) => a.layoutOrder - b.layoutOrder);
 }
 
 // 새 카메라의 기본 스트림 설정
-export function defaultStreamConfig(): camera.StreamConfig {
-  return new camera.StreamConfig({transport: 'tcp', protocol: 'rtsp', buffer_size: 1024 * 1024});
+export function defaultStreamConfig(): StreamConfig {
+  return {transport: 'tcp', protocol: 'rtsp', buffer_size: 1024 * 1024};
 }

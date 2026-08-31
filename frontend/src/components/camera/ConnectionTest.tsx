@@ -1,12 +1,11 @@
 // 카메라 연결 테스트 결과를 표시하는 컴포넌트 (ONVIF / 직접 스트림 공용)
 import React from 'react';
-import {api} from '../../../wailsjs/go/models';
 import {IconCheck, IconAlert} from '../common/Icons';
 
 export type TestState =
   | {kind: 'idle'}
   | {kind: 'testing'}
-  | {kind: 'onvif-ok'; res: api.TestONVIFResponse}
+  | {kind: 'onvif-ok'; res: import('../../types/api').TestONVIFResponse}
   | {kind: 'direct-ok'}
   | {kind: 'fail'; message: string};
 

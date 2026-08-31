@@ -1,6 +1,6 @@
 // PTZ 조이스틱 + 속도 + 프리셋 이동 컨트롤
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {api} from '../../../wailsjs/go/models';
+import {PresetDTO} from '../../types/api';
 import {useCameraStore} from '../../store/cameraStore';
 import {useStreamStore} from '../../store/streamStore';
 import {useUIStore} from '../../store/uiStore';
@@ -18,7 +18,7 @@ export function PTZControl({cameraId}: Props) {
   const getCameraPresets = useCameraStore(s => s.getCameraPresets);
   const pushToast = useUIStore(s => s.pushToast);
   const [speed, setSpeed] = useState(0.5);
-  const [presets, setPresets] = useState<api.PresetDTO[] | null>(null);
+  const [presets, setPresets] = useState<PresetDTO[] | null>(null);
   const [loadingPresets, setLoadingPresets] = useState(false);
   const padRef = useRef<HTMLDivElement | null>(null);
   const knobRef = useRef<HTMLDivElement | null>(null);

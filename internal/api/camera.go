@@ -271,38 +271,69 @@ func (s *CameraService) GetONVIFStreamURI(req GetStreamURIRequest) (string, erro
 // GetCameraPresets는 저장된 자격증명으로 카메라의 PTZ 프리셋 목록을 조회한다.
 // 자격증명이 프론트엔드로 노출되지 않도록 카메라 ID만 받는다.
 func (s *CameraService) GetCameraPresets(cameraID string) ([]PresetDTO, error) {
-	cam, err := s.mgr.Get(cameraID)
+	return onvifCall(s.mgr, cameraID, func(cli *onvif.Client, profile string) ([]PresetDTO, error) {
+		presets, err := cli.Presets(context.Background(), profile)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]PresetDTO, 0, len(presets))
+		for _, p := range presets {
+			out = append(out, PresetDTO{Token: p.Token, Name: p.Name})
+		}
+		return out, nil
+	})
+}
+
+// GetCameraProfiles는 저장된 자격증명으로 카메라의 미디어 프로필을 조회한다.
+func (s *CameraService) GetCameraProfiles(cameraID string) ([]ProfileDTO, error) {
+	return onvifCall(s.mgr, cameraID, func(cli *onvif.Client, profile string) ([]ProfileDTO, error) {
+		profiles, err := cli.Profiles(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		out := make([]ProfileDTO, 0, len(profiles))
+		for _, p := range profiles {
+			out = append(out, ProfileDTO{Token: p.Token, Name: p.Name, Width: p.Width, Height: p.Height})
+		}
+		return out, nil
+	})
+}
+
+// GetCameraStreamURI는 저장된 자격증명으로 카메라의 RTSP URI를 조회한다.
+func (s *CameraService) GetCameraStreamURI(cameraID string) (string, error) {
+	return onvifCall(s.mgr, cameraID, func(cli *onvif.Client, profile string) (string, error) {
+		return cli.StreamURI(context.Background(), profile, "RTSP")
+	})
+}
+
+// onvifCall은 카메라 저장 자격증명(복호화)으로 ONVIF 클라이언트를 준비하고
+// 프로필 토큰을 확정한 뒤 콜백을 실행한다. 등록된 카메라에 대한 모든 ONVIF 조회의 공용 경로다.
+func onvifCall[T any](mgr *camera.Manager, cameraID string, fn func(cli *onvif.Client, profile string) (T, error)) (T, error) {
+	var zero T
+	cam, err := mgr.Get(cameraID)
 	if err != nil {
-		return nil, err
+		return zero, err
 	}
-	pass, err := s.mgr.PasswordOf(cam)
+	pass, err := mgr.PasswordOf(cam)
 	if err != nil {
-		return nil, fmt.Errorf("비밀번호 복호화 실패: %w", err)
+		return zero, fmt.Errorf("비밀번호 복호화 실패: %w", err)
 	}
 	cli, err := onvif.New(cam.XAddr, cam.Username, pass)
 	if err != nil {
-		return nil, err
+		return zero, err
 	}
 	profile := cam.ProfileToken
 	if profile == "" {
 		profiles, err := cli.Profiles(context.Background())
 		if err != nil {
-			return nil, err
+			return zero, fmt.Errorf("프로필 조회 실패: %w", err)
 		}
 		if len(profiles) == 0 {
-			return nil, fmt.Errorf("사용 가능한 프로필이 없음")
+			return zero, fmt.Errorf("사용 가능한 프로필이 없음")
 		}
 		profile = profiles[0].Token
 	}
-	presets, err := cli.Presets(context.Background(), profile)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]PresetDTO, 0, len(presets))
-	for _, p := range presets {
-		out = append(out, PresetDTO{Token: p.Token, Name: p.Name})
-	}
-	return out, nil
+	return fn(cli, profile)
 }
 
 // TestDirectStream은 직접 스트림 URL의 형식과 도달 가능성을 검증한다.
