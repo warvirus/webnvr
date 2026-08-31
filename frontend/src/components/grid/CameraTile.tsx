@@ -12,10 +12,10 @@ interface Props {
   channel: number;
   state: StreamState;
   stats?: StreamStats;
+  retryCount?: number; // 자동 재연결 시도 횟수 (0이면 미표시)
   selected: boolean;
   active: boolean; // 레이아웃에 표시되는 타일인지
   onSelect: () => void;
-  onDismissError?: () => void;
 }
 
 // subscribeFrames는 디코더(메인 스레드)의 프레임 이벤트 중 해당 카메라의 것만 구독한다.
@@ -34,12 +34,12 @@ function subscribeFrames(
   return () => window.removeEventListener('webnvr-frame', handler);
 }
 
-export function CameraTile({camera, channel, state, stats, selected, active, onSelect, onDismissError}: Props) {
+export function CameraTile({camera, channel, state, stats, retryCount = 0, selected, active, onSelect}: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<VideoRenderer | null>(null);
   const [glFailed, setGlFailed] = useState(false);
-  const startStream = useStreamStore(s => s.startStream);
   const history = useStreamStore(s => s.history[camera.id]);
+  const startStream = useStreamStore(s => s.startStream); // 대기 상태 수동 시작 버튼용
 
   useEffect(() => {
     if (!canvasRef.current || !active) return;
@@ -104,14 +104,11 @@ export function CameraTile({camera, channel, state, stats, selected, active, onS
         {glFailed && <div className="tile-idle">WebGL을 사용할 수 없습니다</div>}
         {active && state === 'error' && (
           <div className="tile-idle tile-error-msg">
-            <span>스트림 오류</span>
-            <div style={{display: 'flex', gap: 6}}>
-              <button className="btn" onClick={e => { e.stopPropagation(); startStream(camera.id); }}>재시도</button>
-              {onDismissError && (
-                <button className="btn btn-ghost" onClick={e => { e.stopPropagation(); onDismissError(); }}>확인</button>
-              )}
-            </div>
+            <span>스트림 오류 — 자동 재연결 중{retryCount > 0 ? ` (${retryCount}회)` : ''}…</span>
           </div>
+        )}
+        {active && state === 'starting' && retryCount > 0 && (
+          <div className="tile-idle"><span>재연결 시도 중{retryCount > 1 ? ` (${retryCount}회)` : ''}…</span></div>
         )}
       </div>
 

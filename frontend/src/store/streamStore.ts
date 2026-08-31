@@ -18,6 +18,10 @@ interface StreamStoreState {
   stats: Record<string, StreamStats>;
   // cameraId → 통계 히스토리 (스파크라인용)
   history: Record<string, StatSample[]>;
+  // cameraId → 사용자가 의도한 스트림 상태 (true=재생 중이어야 함 — 자동 재연결 기준)
+  desired: Record<string, boolean>;
+  // cameraId → 자동 재연결 시도 횟수 (타일 표시용)
+  retries: Record<string, number>;
   connected: boolean;
   lastError: string | null;
 
@@ -32,6 +36,50 @@ interface StreamStoreState {
 // 디코더 허브 싱글턴 (모듈 로드 시 1회 생성)
 let hub: DecoderHub | null = null;
 
+// ── 자동 재연결(Desired-State Reconciler) ─────────────────────
+// desired[cameraId]=true인 스트림이 'streaming'이 아니면 지수 백오프로
+// start_stream을 재전송한다. 카메라 오프라인/연결 끊김/WS 재연결 모두 커버.
+const RETRY_BASE_MS = 1_000;
+const RETRY_MAX_MS = 15_000;
+let nextRetryAt: Record<string, number> = {}; // 다음 시도 예정 시각 (비반응형)
+let reconcileTimer: ReturnType<typeof setInterval> | null = null;
+
+function retryDelayMs(attempt: number): number {
+  return Math.min(RETRY_BASE_MS * 2 ** Math.min(attempt - 1, 4), RETRY_MAX_MS);
+}
+
+function ensureReconciler(): void {
+  if (reconcileTimer) return;
+  reconcileTimer = setInterval(() => {
+    const s = useStreamStore.getState();
+    const now = Date.now();
+    let changed = false;
+    const patch: {states?: Record<string, StreamState>; retries?: Record<string, number>} = {};
+    for (const [cameraId, want] of Object.entries(s.desired)) {
+      if (!want) continue;
+      const st = s.states[cameraId];
+      if (st === 'streaming') {
+        if (s.retries[cameraId]) {
+          patch.retries = {...(patch.retries ?? s.retries), [cameraId]: 0};
+          nextRetryAt[cameraId] = 0;
+          changed = true;
+        }
+        continue;
+      }
+      // 재생 의사가 있는데 화면이 안 나오는 상태 → 백오프 후 재시도
+      if (now < (nextRetryAt[cameraId] ?? 0)) continue;
+      const attempt = (s.retries[cameraId] ?? 0) + 1;
+      nextRetryAt[cameraId] = now + retryDelayMs(attempt);
+      patch.retries = {...(patch.retries ?? s.retries), [cameraId]: attempt};
+      patch.states = {...(patch.states ?? s.states), [cameraId]: 'starting'};
+      changed = true;
+      getHub().reset(cameraId); // 이전 세션(포맷 전환 상태 등) 정리 후 신규 시작
+      wsService.send({type: 'start_stream', cameraId});
+    }
+    if (changed) useStreamStore.setState(patch);
+  }, 1_000);
+}
+
 function getHub(): DecoderHub {
   if (!hub) {
     hub = new DecoderHub({
@@ -41,7 +89,13 @@ function getHub(): DecoderHub {
         window.dispatchEvent(new CustomEvent('webnvr-frame', {detail: {cameraId, frame}}));
       },
       onDecoded: (cameraId) => {
-        useStreamStore.setState(s => ({states: {...s.states, [cameraId]: 'streaming'}, lastError: null}));
+        // 디코딩 성공 → 재시도 카운터 리셋 + 배너 해제
+        nextRetryAt[cameraId] = 0;
+        useStreamStore.setState(s => ({
+          states: {...s.states, [cameraId]: 'streaming'},
+          retries: {...s.retries, [cameraId]: 0},
+          lastError: null,
+        }));
       },
       onNotice: (cameraId, message) => {
         // 자가 치유 진행(포맷 전환 등) — 타일 상태는 유지하고 배너에만 표시
@@ -72,6 +126,8 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
   states: {},
   stats: {},
   history: {},
+  desired: {},
+  retries: {},
   connected: false,
   lastError: null,
 
@@ -144,14 +200,19 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
     const offStatus = wsService.onStatus(connected => {
       set({connected});
       if (!connected) {
-        // 연결이 끊기면 모든 스트림이 유실된 것으로 간주한다
+        // 연결이 끊기면 모든 스트림이 유실된 것으로 간주한다.
+        // desired는 유지 — WS 재연결 후 리컨실리어가 자동으로 다시 시작한다.
         const h = getHub();
         Object.keys(get().states).forEach(cameraId => h.detach(cameraId));
         set({states: {}, stats: {}, history: {}});
+      } else {
+        // 재연결 직후 리컨실리어가 즉시 desired 스트림을 복구하도록 백오프 해제
+        nextRetryAt = {};
       }
     });
 
     wsService.connect();
+    ensureReconciler(); // desired 스트림 자동 재연결 감시 시작
 
     return () => {
       offMsg();
@@ -160,12 +221,25 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
   },
 
   startStream: (cameraId) => {
-    getHub().attach(cameraId);
-    set(s => ({states: {...s.states, [cameraId]: 'starting'}}));
+    ensureReconciler();
+    // 사용자 의도 등록 + 이전 세션/백오프 완전 초기화 후 신규 시작
+    nextRetryAt[cameraId] = 0;
+    set(s => ({
+      desired: {...s.desired, [cameraId]: true},
+      retries: {...s.retries, [cameraId]: 0},
+      states: {...s.states, [cameraId]: 'starting'},
+    }));
+    getHub().reset(cameraId);
     wsService.send({type: 'start_stream', cameraId});
   },
 
   stopStream: (cameraId) => {
+    // 사용자 의도 해제 — 자동 재연결 대상에서 제외
+    nextRetryAt[cameraId] = 0;
+    set(s => ({
+      desired: {...s.desired, [cameraId]: false},
+      retries: {...s.retries, [cameraId]: 0},
+    }));
     wsService.send({type: 'stop_stream', cameraId});
     getHub().detach(cameraId);
     set(s => {
@@ -185,6 +259,9 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
 
   stopAllStreams: () => {
     Object.keys(get().states).forEach(id => get().stopStream(id));
+    Object.keys(get().desired).forEach(id => {
+      if (get().desired[id]) get().stopStream(id);
+    });
     wsService.send({type: 'stop_all_streams'});
   },
 

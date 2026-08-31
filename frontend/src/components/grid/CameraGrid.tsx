@@ -10,6 +10,8 @@ interface Props {
   cameras: CameraDTO[];
   states: Record<string, StreamState>;
   stats: Record<string, StreamStats>;
+  desired: Record<string, boolean>;
+  retries: Record<string, number>;
   selectedId: string | null;
   onSelect: (cameraId: string) => void;
 }
@@ -28,7 +30,7 @@ function colsFor(mode: GridMode, slots: number): number {
 }
 
 // CameraGrid는 활성화된 카메라를 OSD 타일로 배치한다.
-export function CameraGrid({cameras, states, stats, selectedId, onSelect}: Props) {
+export function CameraGrid({cameras, states, stats, desired, retries, selectedId, onSelect}: Props) {
   const gridMode = useUIStore(s => s.gridMode);
   const ordered = selectOrderedCameras(cameras).filter(c => c.enabled);
   const slots = slotsFor(gridMode, ordered.length);

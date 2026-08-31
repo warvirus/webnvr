@@ -15,6 +15,8 @@ export function MonitoringPage() {
   const fetchCameras = useCameraStore(s => s.fetchCameras);
   const states = useStreamStore(s => s.states);
   const stats = useStreamStore(s => s.stats);
+  const desired = useStreamStore(s => s.desired);
+  const retries = useStreamStore(s => s.retries);
   const connected = useStreamStore(s => s.connected);
   const lastError = useStreamStore(s => s.lastError);
   const startStream = useStreamStore(s => s.startStream);
@@ -71,6 +73,8 @@ export function MonitoringPage() {
         cameras={cameras}
         states={states}
         stats={stats}
+        desired={desired}
+        retries={retries}
         selectedId={selectedId}
         onSelect={id => setSelectedId(id === selectedId ? null : id)}
       />
