@@ -1,14 +1,14 @@
-// 스트림 상태(스트리밍 중 카메라, 통계)와 WS↔디코더 워커 연결을 관리하는 스토어
+// 스트림 상태(스트리밍 중 카메라, 통계)와 WS↔디코더 연결을 관리하는 스토어
+// v1.1: 디코더 파이프라인은 메인 스레드에서 실행한다 (Safari WebKit은 Worker 내
+// VideoDecoder 출력이 동작하지 않는 사례 대응 — F8). VideoDecoder는 비동기 HW 가속.
 import {create} from 'zustand';
 import {wsService} from '../services/ws';
-import {StreamState, StreamStats} from '../types';
-import {getWorkerInstance} from '../workers/workerInstance';
+import {DecoderHub} from '../services/decoder';
+import {PacketIn} from '../types/stream';
+import {StatSample, StreamState, StreamStats} from '../types/stream';
 
-// 통계 히스토리 샘플 (스파크라인용)
-export interface StatSample {
-  fps: number;
-  kbps: number;
-}
+// 통계 히스토리 샘플 (스파크라인용) — types/stream에서 재노출
+export type {StatSample} from '../types/stream';
 
 const STATS_HISTORY_MAX = 60; // 최근 60초
 
@@ -29,6 +29,41 @@ interface StreamStoreState {
   init: () => () => void;
 }
 
+// 디코더 허브 싱글턴 (모듈 로드 시 1회 생성)
+let hub: DecoderHub | null = null;
+
+function getHub(): DecoderHub {
+  if (!hub) {
+    hub = new DecoderHub({
+      onFrame: (cameraId, frame) => {
+        // 프레임은 VideoFrameRenderer(CustomEvent)로 타일에 전달한다
+        // (스토어에 VideoFrame을 보관하지 않아 GC 부담 최소화)
+        window.dispatchEvent(new CustomEvent('webnvr-frame', {detail: {cameraId, frame}}));
+      },
+      onDecoded: (cameraId) => {
+        useStreamStore.setState(s => ({states: {...s.states, [cameraId]: 'streaming'}, lastError: null}));
+      },
+      onError: (cameraId, message) => {
+        useStreamStore.setState(s => ({
+          states: {...s.states, [cameraId]: 'error'},
+          lastError: message,
+        }));
+      },
+      onStats: (cameraId, stats) => {
+        useStreamStore.setState(s => {
+          const hist = [...(s.history[cameraId] ?? []), {fps: stats.fps, kbps: stats.kbps}];
+          if (hist.length > STATS_HISTORY_MAX) hist.splice(0, hist.length - STATS_HISTORY_MAX);
+          return {
+            stats: {...s.stats, [cameraId]: stats},
+            history: {...s.history, [cameraId]: hist},
+          };
+        });
+      },
+    });
+  }
+  return hub;
+}
+
 export const useStreamStore = create<StreamStoreState>((set, get) => ({
   states: {},
   stats: {},
@@ -37,15 +72,13 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
   lastError: null,
 
   init: () => {
-    // WS 서버 메시지 → 워커/상태 라우팅
+    // WS 서버 메시지 → 디코더/상태 라우팅
     const offMsg = wsService.on(msg => {
       const cameraId = msg.cameraId ?? '';
       switch (msg.type) {
         case 'stream_started': {
-          getWorkerInstance().postMessage({
-            type: 'config',
-            cameraId,
-            codec: msg.codec ?? 'h264',
+          getHub().config(cameraId, {
+            codec: (msg.codec ?? 'h264') as 'h264' | 'h265',
             sps: msg.sps ?? '',
             pps: msg.pps ?? '',
             vps: msg.vps ?? '',
@@ -56,29 +89,32 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
           break;
         }
         case 'rtp_packet': {
-          getWorkerInstance().postMessage({
-            type: 'packet',
-            cameraId,
-            payload: msg.payload ?? '',
-            timestamp: msg.timestamp ?? 0,
-            marker: msg.marker ?? false,
-            sequence: msg.sequence ?? 0,
-          });
+          const p: PacketIn = {
+            seq: (msg.sequence ?? 0) & 0xffff,
+            ts: (msg.timestamp ?? 0) >>> 0,
+            marker: !!msg.marker,
+            payload: base64ToBytes(msg.payload ?? ''),
+          };
+          getHub().packet(cameraId, p);
           break;
         }
         case 'rtp_batch': {
           // 고비트레이트 스트림: 여러 패킷을 한 메시지로 전달 (백엔드 확장)
           if (msg.packets && msg.packets.length > 0) {
-            getWorkerInstance().postMessage({
-              type: 'packet_batch',
-              cameraId,
-              packets: msg.packets,
-            });
+            const hub = getHub();
+            for (const p of msg.packets) {
+              hub.packet(cameraId, {
+                seq: (p.sq ?? 0) & 0xffff,
+                ts: (p.ts ?? 0) >>> 0,
+                marker: !!p.m,
+                payload: base64ToBytes(p.p),
+              });
+            }
           }
           break;
         }
         case 'stream_stopped': {
-          getWorkerInstance().postMessage({type: 'detach', cameraId});
+          getHub().detach(cameraId);
           set(s => {
             const states = {...s.states};
             const stats = {...s.stats};
@@ -91,7 +127,7 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
           break;
         }
         case 'stream_error': {
-          getWorkerInstance().postMessage({type: 'detach', cameraId});
+          getHub().detach(cameraId);
           set(s => ({states: {...s.states, [cameraId]: 'error'}, lastError: msg.error ?? '알 수 없는 오류'}));
           break;
         }
@@ -100,44 +136,14 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
       }
     });
 
-    // 워커 출력 → 상태
-    const onWorkerMsg = (ev: MessageEvent) => {
-      const msg = ev.data;
-      switch (msg.type) {
-        case 'decoded':
-          // 첫 프레임 디코딩 성공 → 오류 상태 해제 및 스트리밍 확정
-          set(s => ({states: {...s.states, [msg.cameraId]: 'streaming'}, lastError: null}));
-          break;
-        case 'stats': {
-          const st = msg.stats;
-          set(s => {
-            const hist = [...(s.history[msg.cameraId] ?? []), {fps: st.fps, kbps: st.kbps}];
-            if (hist.length > STATS_HISTORY_MAX) hist.splice(0, hist.length - STATS_HISTORY_MAX);
-            return {
-              stats: {...s.stats, [msg.cameraId]: st},
-              history: {...s.history, [msg.cameraId]: hist},
-            };
-          });
-          break;
-        }
-        case 'error':
-          set(s => ({
-            states: {...s.states, [msg.cameraId]: 'error'},
-            lastError: msg.message as string,
-          }));
-          break;
-      }
-    };
-    getWorkerInstance().addEventListener('message', onWorkerMsg);
-
     // 연결 상태 추적 + 재연결 시 세션 리셋
     const offStatus = wsService.onStatus(connected => {
       set({connected});
       if (!connected) {
         // 연결이 끊기면 모든 스트림이 유실된 것으로 간주한다
-        const w = getWorkerInstance();
-        Object.keys(get().states).forEach(cameraId => w.postMessage({type: 'detach', cameraId}));
-        set({states: {}, stats: {}});
+        const h = getHub();
+        Object.keys(get().states).forEach(cameraId => h.detach(cameraId));
+        set({states: {}, stats: {}, history: {}});
       }
     });
 
@@ -146,19 +152,18 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
     return () => {
       offMsg();
       offStatus();
-      getWorkerInstance().removeEventListener('message', onWorkerMsg);
     };
   },
 
   startStream: (cameraId) => {
-    getWorkerInstance().postMessage({type: 'attach', cameraId});
+    getHub().attach(cameraId);
     set(s => ({states: {...s.states, [cameraId]: 'starting'}}));
     wsService.send({type: 'start_stream', cameraId});
   },
 
   stopStream: (cameraId) => {
     wsService.send({type: 'stop_stream', cameraId});
-    getWorkerInstance().postMessage({type: 'detach', cameraId});
+    getHub().detach(cameraId);
     set(s => {
       const states = {...s.states};
       const stats = {...s.stats};
@@ -183,3 +188,13 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
     wsService.send({type: 'ptz', cameraId, command});
   },
 }));
+
+// base64 → Uint8Array (ws → 디코더 경로)
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// 카메라를 layout_order 순으로 정렬해 반환하는 셀렉터는 cameraStore에 있다.

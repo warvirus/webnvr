@@ -6,12 +6,6 @@ import {VideoRenderer} from './VideoRenderer';
 import {IconCamera, IconPlay} from '../common/Icons';
 import {useStreamStore} from '../../store/streamStore';
 
-interface FrameMsg {
-  type: 'frame';
-  cameraId: string;
-  frame: VideoFrame;
-}
-
 interface Props {
   camera: CameraDTO;
   channel: number;
@@ -23,25 +17,21 @@ interface Props {
   onDismissError?: () => void;
 }
 
-// subscribeWorkerFrames는 워커의 프레임 메시지 중 해당 카메라의 것만 구독한다.
-function subscribeWorkerFrames(
-  worker: Worker,
+// subscribeFrames는 디코더(메인 스레드)의 프레임 이벤트 중 해당 카메라의 것만 구독한다.
+// v1.1: Worker가 제거되어 디코더가 메인 스레드에서 CustomEvent로 프레임을 발행한다.
+function subscribeFrames(
   cameraId: string,
   onFrame: (frame: VideoFrame) => void,
 ): () => void {
-  const handler = (ev: MessageEvent) => {
-    const msg = ev.data as FrameMsg;
-    if (msg.type === 'frame' && msg.cameraId === cameraId) {
-      onFrame(msg.frame);
+  const handler = (ev: Event) => {
+    const detail = (ev as CustomEvent<{cameraId: string; frame: VideoFrame}>).detail;
+    if (detail.cameraId === cameraId) {
+      onFrame(detail.frame);
     }
   };
-  worker.addEventListener('message', handler);
-  return () => worker.removeEventListener('message', handler);
+  window.addEventListener('webnvr-frame', handler);
+  return () => window.removeEventListener('webnvr-frame', handler);
 }
-
-// getWorker는 streamStore가 만든 워커 인스턴스를 얻기 위한 우회 경로다.
-// (store 모듈의 싱글턴 워커를 재생성하지 않고 참조)
-import {getWorkerInstance} from '../../workers/workerInstance';
 
 export function CameraTile({camera, channel, state, stats, selected, active, onSelect, onDismissError}: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -49,15 +39,13 @@ export function CameraTile({camera, channel, state, stats, selected, active, onS
   const [glFailed, setGlFailed] = useState(false);
   const startStream = useStreamStore(s => s.startStream);
 
-  const worker = useMemo(() => getWorkerInstance(), []);
-
   useEffect(() => {
     if (!canvasRef.current || !active) return;
     const renderer = new VideoRenderer(canvasRef.current);
     rendererRef.current = renderer;
     if (!renderer.ready) setGlFailed(true);
 
-    const off = subscribeWorkerFrames(worker, camera.id, frame => {
+    const off = subscribeFrames(camera.id, frame => {
       renderer.draw(frame);
       frame.close();
     });
@@ -66,7 +54,7 @@ export function CameraTile({camera, channel, state, stats, selected, active, onS
       renderer.dispose();
       rendererRef.current = null;
     };
-  }, [worker, camera.id, active]);
+  }, [camera.id, active]);
 
   const host = camera.type === 'onvif' ? camera.xaddr : camera.streamUrl?.replace(/^\w+:\/\//, '').split('/')[0];
 

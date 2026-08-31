@@ -1,31 +1,42 @@
-// 카메라별 RTP 수신 → Jitter 버퍼 → RFC 6184/7798 디페이저 → EncodedVideoChunk 조립 → WebCodecs 디코딩 워커
-export {};
+// H.264/H.265 RTP 스트림 디코딩 파이프라인 (컨텍스트 독립 — Worker와 메인 스레드 공용)
+//
+// Safari(WebKit)는 Worker 내 VideoDecoder 인스턴스가 출력을 생성하지 않는 사례가 있어
+// v1.1에서는 메인 스레드 실행을 기본으로 한다. VideoDecoder는 비동기 HW 가속이므로
+// 메인 스레드 실행 시에도 블로킹이 없다.
+//
+// 포맷 후보: AVCC(avcC description + 길이 접두어) 우선 → 무출력 시 Annex B로 자동 전환.
+// Safari는 description 없는 H.264 입력을 받지 않는다(F7 참조).
 
-// tsconfig가 DOM lib를 포함하므로 워커 컨텍스트를 로컬 타입으로 선언한다.
-interface WorkerCtx {
-  postMessage(msg: unknown, transfer?: Transferable[]): void;
-  onmessage: ((ev: MessageEvent) => void) | null;
-}
-const ctx = self as unknown as WorkerCtx;
-
-interface PacketIn {
+export interface PacketIn {
   seq: number;
   ts: number;
   marker: boolean;
   payload: Uint8Array;
 }
 
-interface CodecConfig {
+export interface CodecConfigIn {
   codec: 'h264' | 'h265';
-  sps: Uint8Array;
-  pps: Uint8Array;
-  vps: Uint8Array;
+  sps: string;
+  pps: string;
+  vps: string;
   clockRate: number;
 }
 
+export interface SessionEvents {
+  onFrame: (cameraId: string, frame: VideoFrame) => void;
+  onDecoded: (cameraId: string) => void; // 첫 프레임 디코딩 성공
+  onError: (cameraId: string, message: string) => void;
+  onStats: (cameraId: string, stats: SessionStats) => void;
+}
+
+export interface SessionStats {
+  fps: number;
+  kbps: number;
+  packets: number;
+  drops: number;
+}
+
 // 디코더 포맷 후보 (Safari는 avcC description 필수, Chromium은 둘 다 허용)
-// AVCC   : description=avcC + 길이 접두어 청크 (권장 — 크로스 브라우저)
-// ANNEXB : description 없음 + 시작코드 청크 (Chromium 대안)
 const FORMAT_AVCC = 0;
 const FORMAT_ANNEXB = 1;
 const FORMAT_COUNT = 2;
@@ -134,10 +145,9 @@ function toAvcc(nalus: Uint8Array[]): Uint8Array {
 // ───────────────────────────────────────────────────────────
 
 // Session은 카메라 하나의 디코딩 파이프라인이다.
-// 디코더 설정은 동기적으로 수행해 프레임 누적과의 레이스를 원천 차단한다.
-class Session {
+export class Session {
   cameraId: string;
-  config: CodecConfig | null = null;
+  config: CodecConfigIn | null = null;
   decoder: VideoDecoder | null = null;
   formatIdx = FORMAT_AVCC;   // 현재 시도 중인 청크 포맷
   sawKeyframe = false;
@@ -172,17 +182,20 @@ class Session {
   lastFrames = 0;
   lastBytes = 0;
 
-  constructor(cameraId: string) {
+  private ev: SessionEvents;
+
+  constructor(cameraId: string, ev: SessionEvents) {
     this.cameraId = cameraId;
+    this.ev = ev;
   }
 
   // paramSets는 유효한 파라미터 셋을 반환한다.
   private paramSets(): {sps: Uint8Array | null; pps: Uint8Array | null; vps: Uint8Array | null} {
     const codec = this.config?.codec ?? 'h264';
     return {
-      sps: this.config && this.config.sps.length ? this.config.sps : this.streamSps,
-      pps: this.config && this.config.pps.length ? this.config.pps : this.streamPps,
-      vps: codec === 'h265' ? (this.config && this.config.vps.length ? this.config.vps : this.streamVps) : null,
+      sps: this.config && this.config.sps.length ? b64ToBytes(this.config.sps) : this.streamSps,
+      pps: this.config && this.config.pps.length ? b64ToBytes(this.config.pps) : this.streamPps,
+      vps: codec === 'h265' ? (this.config && this.config.vps.length ? b64ToBytes(this.config.vps) : this.streamVps) : null,
     };
   }
 
@@ -226,7 +239,7 @@ class Session {
       try {
         const dec = new VideoDecoder({
           output: (frame: VideoFrame) => {
-            ctx.postMessage({type: 'frame', cameraId: this.cameraId, frame}, [frame]);
+            this.ev.onFrame(this.cameraId, frame);
           },
           error: (e: DOMException) => {
             this.lastError = `디코더 오류: ${e.message}`;
@@ -304,20 +317,12 @@ class Session {
     // 키프레임 이후 무출력 → 다른 청크 포맷으로 전환 (Safari avcC 필수 이슈 대응)
     if (this.sawKeyframe && now - this.firstKeyMs > STALL_MS) {
       if (this.advanceFormat()) {
-        ctx.postMessage({
-          type: 'error',
-          cameraId: this.cameraId,
-          message: `디코딩 출력이 없어 청크 포맷을 전환했습니다 (${this.formatIdx === FORMAT_ANNEXB ? 'Annex B' : 'AVCC'})`,
-        });
+        this.ev.onError(this.cameraId, `디코딩 출력이 없어 청크 포맷을 전환했습니다 (${this.formatIdx === FORMAT_ANNEXB ? 'Annex B' : 'AVCC'})`);
         return;
       }
       if (!this.diagSent && now - this.firstKeyMs > STALL_GIVEUP_MS) {
         this.diagSent = true;
-        ctx.postMessage({
-          type: 'error',
-          cameraId: this.cameraId,
-          message: `키프레임 이후 ${STALL_GIVEUP_MS / 1000}초간 프레임이 출력되지 않았습니다 (이 환경의 WebCodecs가 ${this.config?.codec} 디코딩을 지원하지 않는 것으로 보임)`,
-        });
+        this.ev.onError(this.cameraId, `키프레임 이후 ${STALL_GIVEUP_MS / 1000}초간 프레임이 출력되지 않았습니다 (이 환경의 WebCodecs가 ${this.config?.codec} 디코딩을 지원하지 않는 것으로 보임)`);
       }
       return;
     }
@@ -326,11 +331,7 @@ class Session {
     if (!this.sawKeyframe && now - this.firstPacketMs > 20_000) {
       if (!this.diagSent) {
         this.diagSent = true;
-        ctx.postMessage({
-          type: 'error',
-          cameraId: this.cameraId,
-          message: '20초간 키프레임을 수신하지 못했습니다 — 카메라의 GOP(키 프레임 간격) 설정을 확인하세요',
-        });
+        this.ev.onError(this.cameraId, '20초간 키프레임을 수신하지 못했습니다 — 카메라의 GOP(키 프레임 간격) 설정을 확인하세요');
       }
     }
   }
@@ -425,7 +426,7 @@ class Session {
     this.frames++;
     if (this.frames === 1) {
       // 첫 프레임 디코딩 성공 → UI의 오류/대기 상태를 해제한다
-      ctx.postMessage({type: 'decoded', cameraId: this.cameraId});
+      this.ev.onDecoded(this.cameraId);
     }
     try {
       this.decoder.decode(chunk);
@@ -538,7 +539,7 @@ class Session {
   }
 
   // stats는 1초 주기로 통계를 산출한다.
-  stats(): {fps: number; kbps: number; packets: number; drops: number} | null {
+  stats(): SessionStats | null {
     const now = performance.now();
     if (this.lastStats === 0) {
       this.lastStats = now;
@@ -567,81 +568,60 @@ class Session {
   }
 }
 
-// ───────────────────────────────────────────────────────────
+// DecoderHub는 세션 집합과 주기 처리를 관리한다. (Worker/메인 스레드 공용)
+export class DecoderHub {
+  private sessions = new Map<string, Session>();
+  private ev: SessionEvents;
+  private ticker: ReturnType<typeof setInterval> | null = null;
+  private statsTimer: ReturnType<typeof setInterval> | null = null;
 
-const sessions = new Map<string, Session>();
-
-const ticker = setInterval(() => {
-  for (const s of sessions.values()) s.flush();
-}, TICK_MS);
-
-const statsTimer = setInterval(() => {
-  for (const [cameraId, s] of sessions) {
-    const st = s.stats();
-    if (st) ctx.postMessage({type: 'stats', cameraId, stats: st});
+  constructor(ev: SessionEvents) {
+    this.ev = ev;
+    this.ticker = setInterval(() => {
+      for (const s of this.sessions.values()) s.flush();
+    }, TICK_MS);
+    this.statsTimer = setInterval(() => {
+      for (const [cameraId, s] of this.sessions) {
+        const st = s.stats();
+        if (st) this.ev.onStats(cameraId, st);
+      }
+    }, STATS_MS);
   }
-}, STATS_MS);
 
-ctx.onmessage = (ev: MessageEvent) => {
-  const msg = ev.data;
-  switch (msg.type) {
-    case 'attach': {
-      if (!sessions.has(msg.cameraId)) {
-        sessions.set(msg.cameraId, new Session(msg.cameraId));
-      }
-      break;
-    }
-    case 'config': {
-      const s = sessions.get(msg.cameraId);
-      if (!s) break;
-      s.config = {
-        codec: msg.codec,
-        sps: b64ToBytes(msg.sps ?? ''),
-        pps: b64ToBytes(msg.pps ?? ''),
-        vps: b64ToBytes(msg.vps ?? ''),
-        clockRate: msg.clockRate ?? 90000,
-      };
-      // 파라미터 셋이 왔다면 즉시 디코더 준비 (동기)
-      s.prepareDecoder();
-      break;
-    }
-    case 'packet': {
-      const s = sessions.get(msg.cameraId);
-      if (!s) break;
-      s.push({
-        seq: msg.sequence & 0xffff,
-        ts: msg.timestamp >>> 0,
-        marker: !!msg.marker,
-        payload: b64ToBytes(msg.payload),
-      });
-      break;
-    }
-    case 'packet_batch': {
-      const s = sessions.get(msg.cameraId);
-      if (!s) break;
-      for (const p of msg.packets) {
-        s.push({
-          seq: p.sq & 0xffff,
-          ts: p.ts >>> 0,
-          marker: !!p.m,
-          payload: b64ToBytes(p.p),
-        });
-      }
-      break;
-    }
-    case 'detach':
-    case 'reset': {
-      const s = sessions.get(msg.cameraId);
-      if (s) {
-        const camId = s.cameraId;
-        s.dispose();
-        if (msg.type === 'detach') {
-          sessions.delete(camId);
-        } else {
-          sessions.set(camId, new Session(camId));
-        }
-      }
-      break;
+  attach(cameraId: string) {
+    if (!this.sessions.has(cameraId)) {
+      this.sessions.set(cameraId, new Session(cameraId, this.ev));
     }
   }
-};
+
+  config(cameraId: string, cfg: CodecConfigIn) {
+    const s = this.sessions.get(cameraId);
+    if (!s) return;
+    s.config = cfg;
+    s.prepareDecoder();
+  }
+
+  packet(cameraId: string, p: PacketIn) {
+    this.sessions.get(cameraId)?.push(p);
+  }
+
+  detach(cameraId: string) {
+    const s = this.sessions.get(cameraId);
+    if (s) {
+      s.dispose();
+      this.sessions.delete(cameraId);
+    }
+  }
+
+  reset(cameraId: string) {
+    this.detach(cameraId);
+    this.attach(cameraId);
+  }
+
+  dispose() {
+    if (this.ticker) clearInterval(this.ticker);
+    if (this.statsTimer) clearInterval(this.statsTimer);
+    for (const s of this.sessions.values()) s.dispose();
+    this.sessions.clear();
+  }
+}
