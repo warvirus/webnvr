@@ -43,6 +43,10 @@ function getHub(): DecoderHub {
       onDecoded: (cameraId) => {
         useStreamStore.setState(s => ({states: {...s.states, [cameraId]: 'streaming'}, lastError: null}));
       },
+      onNotice: (cameraId, message) => {
+        // 자가 치유 진행(포맷 전환 등) — 타일 상태는 유지하고 배너에만 표시
+        useStreamStore.setState({lastError: message});
+      },
       onError: (cameraId, message) => {
         useStreamStore.setState(s => ({
           states: {...s.states, [cameraId]: 'error'},

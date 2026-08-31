@@ -21,14 +21,14 @@ type fakeController struct {
 	started []string
 	stopped []string
 	ptzCmds []PTZCommand
-	failIDs map[string]bool // Start 실패 카메라
-	chans   map[string]chan stream.Event
+	failIDs map[string]bool                // Start 실패 카메라
+	chans   map[string][]chan stream.Event // 카메라별 다중 구독자
 }
 
 func newFakeController() *fakeController {
 	return &fakeController{
 		failIDs: map[string]bool{},
-		chans:   map[string]chan stream.Event{},
+		chans:   map[string][]chan stream.Event{},
 	}
 }
 
@@ -46,10 +46,10 @@ func (f *fakeController) Stop(cameraID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.stopped = append(f.stopped, cameraID)
-	if ch, ok := f.chans[cameraID]; ok {
+	for _, ch := range f.chans[cameraID] {
 		close(ch)
-		delete(f.chans, cameraID)
 	}
+	delete(f.chans, cameraID)
 	return nil
 }
 
@@ -63,13 +63,17 @@ func (f *fakeController) Subscribe(cameraID string) (<-chan stream.Event, func()
 		return nil, nil, fmt.Errorf("실행 중인 스트림이 없음: %s", cameraID)
 	}
 	ch := make(chan stream.Event, 64)
-	f.chans[cameraID] = ch
+	f.chans[cameraID] = append(f.chans[cameraID], ch)
 	cancel := func() {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		if cur, ok := f.chans[cameraID]; ok && cur == ch {
-			close(cur)
-			delete(f.chans, cameraID)
+		cur := f.chans[cameraID]
+		for i, c := range cur {
+			if c == ch {
+				f.chans[cameraID] = append(cur[:i], cur[i+1:]...)
+				close(ch)
+				return
+			}
 		}
 	}
 	return ch, cancel, nil
@@ -82,20 +86,40 @@ func (f *fakeController) PTZ(cameraID string, cmd PTZCommand) error {
 	return nil
 }
 
-// emit은 구독 채널이 등록될 때까지 기다린 뒤 이벤트를 발생시킨다.
+// emit은 구독 채널이 등록될 때까지 기다린 뒤 모든 구독자에게 이벤트를 발생시킨다.
 func (f *fakeController) emit(t *testing.T, cameraID string, ev stream.Event) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		f.mu.Lock()
-		ch := f.chans[cameraID]
+		chs := f.chans[cameraID]
 		f.mu.Unlock()
-		if ch != nil {
-			ch <- ev
+		if len(chs) > 0 {
+			for _, ch := range chs {
+				ch <- ev
+			}
 			return
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("구독 채널이 등록되지 않음: %s", cameraID)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// waitSubs는 카메라의 구독자 수가 n 이상이 될 때까지 기다린다.
+func (f *fakeController) waitSubs(t *testing.T, cameraID string, n int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		f.mu.Lock()
+		got := len(f.chans[cameraID])
+		f.mu.Unlock()
+		if got >= n {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("구독자 수 부족: %s (got %d, want >= %d)", cameraID, got, n)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -277,5 +301,54 @@ func TestUnknownMessageType(t *testing.T) {
 	m := recv(t, c)
 	if m.Type != MsgStreamError || m.Error == "" {
 		t.Errorf("알 수 없는 타입 처리 불일치: %+v", m)
+	}
+}
+
+// TestTwoClientsSameStream는 2개 연결이 같은 카메라를 구독할 때
+// 둘 다 stream_started(코덱 메타데이터)를 수신하는지 확인한다.
+// (늦게 합류한 클라이언트가 영상을 못 보던 결함의 회귀 테스트 — 2026-09-01)
+func TestTwoClientsSameStream(t *testing.T) {
+	ctrl := newFakeController()
+	srv := newTestServer(t, ctrl)
+
+	// 클라이언트 A: 먼저 구독
+	cA := connect(t, srv)
+	if err := cA.WriteJSON(ClientMsg{Type: MsgStartStream, CameraID: "cam-1"}); err != nil {
+		t.Fatal(err)
+	}
+	ctrl.waitSubs(t, "cam-1", 1)
+	ctrl.emit(t, "cam-1", stream.StartedEvent{Info: stream.Info{
+		CameraID: "cam-1", Codec: stream.CodecH264, SPS: []byte{0x67}, PPS: []byte{0x68},
+		Width: 352, Height: 288, ClockRate: 90000,
+	}})
+	if m := recv(t, cA); m.Type != MsgStreamStarted {
+		t.Fatalf("A의 stream_started 미수신: %+v", m)
+	}
+	ctrl.emit(t, "cam-1", stream.PacketEvent{Packet: stream.Packet{Sequence: 1, Payload: []byte{9}}})
+	if m := recv(t, cA); m.Type != MsgRTPBatch {
+		t.Fatalf("A의 rtp_batch 미수신: %+v", m)
+	}
+
+	// 클라이언트 B: 나중에 합류 — 코덱 메타데이터가 이미 확정된 상태
+	cB := connect(t, srv)
+	if err := cB.WriteJSON(ClientMsg{Type: MsgSubscribe, CameraID: "cam-1"}); err != nil {
+		t.Fatal(err)
+	}
+	// B의 구독 등록 대기 (등록 전 emit하면 이벤트가 유실된다)
+	ctrl.waitSubs(t, "cam-1", 2)
+
+	// fakeController는 Started 없이 채널만 제공 — 실제 Hub의 늦은 구독자
+	// StartedEvent 재전송은 stream_test.go의 TestHubLateSubscriber가 검증한다.
+	// 여기서는 2연결 배치 전달만 확인한다.
+	ctrl.emit(t, "cam-1", stream.PacketEvent{Packet: stream.Packet{Sequence: 2, Payload: []byte{8}}})
+	m := recv(t, cB)
+	if m.Type != MsgRTPBatch {
+		t.Fatalf("B의 rtp_batch 미수신: %+v", m)
+	}
+
+	// A에도 계속 전달되는지 (느린 구독자와 무관)
+	ctrl.emit(t, "cam-1", stream.PacketEvent{Packet: stream.Packet{Sequence: 3, Payload: []byte{7}}})
+	if m := recv(t, cA); m.Type != MsgRTPBatch {
+		t.Errorf("A의 후속 배치 미수신: %+v", m)
 	}
 }

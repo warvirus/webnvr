@@ -25,6 +25,7 @@ export interface CodecConfigIn {
 export interface SessionEvents {
   onFrame: (cameraId: string, frame: VideoFrame) => void;
   onDecoded: (cameraId: string) => void; // 첫 프레임 디코딩 성공
+  onNotice: (cameraId: string, message: string) => void; // 자가 치성 진행 알림 (오류 아님)
   onError: (cameraId: string, message: string) => void;
   onStats: (cameraId: string, stats: SessionStats) => void;
 }
@@ -317,7 +318,7 @@ export class Session {
     // 키프레임 이후 무출력 → 다른 청크 포맷으로 전환 (Safari avcC 필수 이슈 대응)
     if (this.sawKeyframe && now - this.firstKeyMs > STALL_MS) {
       if (this.advanceFormat()) {
-        this.ev.onError(this.cameraId, `디코딩 출력이 없어 청크 포맷을 전환했습니다 (${this.formatIdx === FORMAT_ANNEXB ? 'Annex B' : 'AVCC'})`);
+        this.ev.onNotice(this.cameraId, `디코딩 출력이 없어 청크 포맷을 전환했습니다 (${this.formatIdx === FORMAT_ANNEXB ? 'Annex B' : 'AVCC'})`);
         return;
       }
       if (!this.diagSent && now - this.firstKeyMs > STALL_GIVEUP_MS) {

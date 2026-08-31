@@ -126,6 +126,8 @@ func (h *Hub) StopAll() error {
 
 // Subscribe는 구독자 채널과 구독 해제 함수를 반환한다.
 // 스트림이 실행 중이어야 하며, 채널로 Started/Packet/Stopped 이벤트가 순서대로 전달된다.
+// 늦게 합류한 구독자(2번째 클라이언트 등)에게는 코덱 메타데이터(StartedEvent)를
+// 즉시 재전송한다 — 그렇지 않으면 디코더가 설정되지 않아 영상이 나오지 않는다.
 func (h *Hub) Subscribe(cameraID string) (<-chan Event, func(), error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -135,6 +137,14 @@ func (h *Hub) Subscribe(cameraID string) (<-chan Event, func(), error) {
 	}
 	s := &subscriber{ch: make(chan Event, subscriberBuf)}
 	e.subs[s] = struct{}{}
+	// 늦은 구독자 재전송: 패킷보다 반드시 앞서 도착해야 하므로 구독 등록 즉시 채널에 넣는다.
+	if e.info.Codec != "" {
+		select {
+		case s.ch <- StartedEvent{Info: e.info}:
+		default:
+			// 채널 포화는 불가능(방금 생성) — 방어용
+		}
+	}
 	cancel := func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()

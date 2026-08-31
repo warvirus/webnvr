@@ -327,3 +327,48 @@ func TestDialRTSPIntegration(t *testing.T) {
 		t.Errorf("수신 패킷 수 = %d, want >= 10", pktCount)
 	}
 }
+
+// TestHubLateSubscriber는 늦게 합류한 구독자에게 코덱 정보가 즉시 재전송되는지 확인한다.
+// (2번째 클라이언트가 영상을 못 보던 원인 — 2026-09-01)
+func TestHubLateSubscriber(t *testing.T) {
+	hub := NewHub(testCameraSource{urls: map[string]string{"cam-1": "rtsp://127.0.0.1:1/stream"}}, fakeDialer(50))
+
+	if err := hub.Start("cam-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// 첫 구독자가 Started를 받을 때까지 대기 (코덱 정보 확정)
+	ch1, cancel1, err := hub.Subscribe("cam-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel1()
+	evts1 := collectEvents(ch1, 2*time.Second, func(evts []Event) bool {
+		_, ok := evts[0].(StartedEvent)
+		return ok
+	})
+	if len(evts1) == 0 {
+		t.Fatal("첫 구독자 Started 미수신")
+	}
+
+	// 늦은 구독자 합류 — 코덱 정보가 이미 확정된 상태
+	ch2, cancel2, err := hub.Subscribe("cam-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel2()
+
+	evts2 := collectEvents(ch2, 2*time.Second, func(evts []Event) bool {
+		return len(evts) >= 3 // started + 패킷 2개
+	})
+	if len(evts2) < 3 {
+		t.Fatalf("늦은 구독자 이벤트 부족: %d", len(evts2))
+	}
+	if _, ok := evts2[0].(StartedEvent); !ok {
+		t.Errorf("늦은 구독자의 첫 이벤트가 StartedEvent가 아님: %T", evts2[0])
+	}
+	info := evts2[0].(StartedEvent).Info
+	if info.Codec != CodecH264 || info.SPS == nil {
+		t.Errorf("재전송된 Info 불일치: %+v", info)
+	}
+}
