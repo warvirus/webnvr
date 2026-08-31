@@ -420,7 +420,7 @@ input, select { font-family: inherit; }
 /* ── 모니터링 그리드 ──────────────────────────────────────── */
 .camera-monitor-grid {
   display: grid;
-  gap: 12px;
+  gap: 4px;
 }
 
 /* 레이아웃별 열 수는 style 속성으로 주입 */
@@ -428,14 +428,14 @@ input, select { font-family: inherit; }
 .tile {
   position: relative;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--panel);
-  padding: 10px 12px;
+  padding: 6px 8px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   cursor: pointer;
-  min-height: 220px;
+  min-height: 200px;
 }
 .tile.selected { border-color: var(--amber); }
 .tile.selected .osd-corner { border-color: var(--amber); }
