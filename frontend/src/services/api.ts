@@ -2,13 +2,9 @@
 // Wails 바인딩을 대체하며, 네이티브 앱과 DevServer 브라우저에서 동일하게 동작한다.
 import * as t from '../types/api';
 
-// 백엔드 주소: 현재 페이지의 호스트명 기반 (doc v1.1)
-// - 네이티브/로컬: localhost 또는 127.0.0.1 → 127.0.0.1:8080
-// - 외부 브라우저 (http://<맥IP>:8080 직접 접속): 동일 오리진 → <맥IP>:8080
-// - DevServer (localhost:34115 / <맥IP>:34115): hostname은 백엔드 머신을 가리킴
-const BACKEND_HOST = typeof location !== 'undefined' && location.hostname ? location.hostname : '127.0.0.1';
-const BACKEND_PORT = 8080;
-const BASE = `http://${BACKEND_HOST}:${BACKEND_PORT}`;
+import {backendBase} from './backend';
+
+const BASE = backendBase();
 
 // request는 JSON 응답을 파싱하고 오류( error 필드 )를 예외로 변환한다.
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {

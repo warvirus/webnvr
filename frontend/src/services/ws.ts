@@ -1,10 +1,7 @@
 // 백엔드 WebSocket 연결을 관리하는 싱글턴 서비스 (재연결 지수백오프, 전송 큐, 하트비트)
 import {ClientMsg, ServerMsg} from '../types';
 
-const WS_PORT = 8080;
-const WS_PATH = '/ws';
-// 백엔드 호스트: api.ts와 동일 규칙 — 현재 페이지의 호스트명 기반 (v1.1)
-const WS_HOST = typeof location !== 'undefined' && location.hostname ? location.hostname : '127.0.0.1';
+import {backendWS} from './backend';
 const HEARTBEAT_MS = 25_000;
 const MAX_BACKOFF_MS = 30_000;
 
@@ -25,7 +22,7 @@ export class WsService {
 
   connect() {
     if (this.disposed || this.ws) return;
-    const ws = new WebSocket(`ws://${WS_HOST}:${WS_PORT}${WS_PATH}`);
+    const ws = new WebSocket(backendWS());
     this.ws = ws;
 
     ws.onopen = () => {
