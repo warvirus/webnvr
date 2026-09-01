@@ -198,15 +198,20 @@ func TestDimensionsOf(t *testing.T) {
 
 // testRTSPServer는 실제 RTSP 서버를 흉내 내는 통합 테스트 서버다.
 type testRTSPServer struct {
-	srv    *gortsplib.Server
-	stream *gortsplib.ServerStream
-	medi   *description.Media
-	h264f  *format.H264
+	srv        *gortsplib.Server
+	stream     *gortsplib.ServerStream
+	medi       *description.Media
+	h264f      *format.H264
+	ssrcSwitch bool // true면 스트림 도중 SSRC 변경 (SSRC 관용 검증용)
 }
 
 func newTestRTSPServer(t *testing.T) *testRTSPServer {
+	return newTestRTSPServerOpt(t, false)
+}
+
+func newTestRTSPServerOpt(t *testing.T, ssrcSwitch bool) *testRTSPServer {
 	t.Helper()
-	ts := &testRTSPServer{}
+	ts := &testRTSPServer{ssrcSwitch: ssrcSwitch}
 
 	ts.h264f = &format.H264{
 		PayloadTyp:        96,
@@ -251,7 +256,8 @@ func (ts *testRTSPServer) OnSetup(*gortsplib.ServerHandlerOnSetupCtx) (*base.Res
 }
 
 func (ts *testRTSPServer) OnPlay(*gortsplib.ServerHandlerOnPlayCtx) (*base.Response, error) {
-	// PLAY 후 IDR/슬라이스 NALU 10개를 전송한다.
+	// PLAY 후 IDR/슬라이스 NALU 10개를 전송한다. ssrcSwitch가 true면
+	// 중간에 SSRC를 변경해 전송한다 (카메라 서버의 인코더 재시작 재현).
 	go func() {
 		enc, err := ts.h264f.CreateEncoder()
 		if err != nil {
@@ -267,12 +273,21 @@ func (ts *testRTSPServer) OnPlay(*gortsplib.ServerHandlerOnPlayCtx) (*base.Respo
 			if err != nil || len(pkts) == 0 {
 				continue
 			}
-			_ = ts.stream.WritePacketRTP(ts.medi, pkts[0])
+			if ts.ssrcSwitch && i == 5 {
+				for _, p := range pkts {
+					p.SSRC = 0xdeadbeef // 중간 SSRC 변경
+				}
+			}
+			for _, p := range pkts {
+				_ = ts.stream.WritePacketRTP(ts.medi, p)
+			}
 			time.Sleep(5 * time.Millisecond)
 		}
 	}()
 	return &base.Response{StatusCode: base.StatusOK}, nil
 }
+
+// testRTSPServer에 ssrcSwitch 필드 추가를 위한 래퍼 필드 (아래에서 구조체에 추가)
 
 // freePort는 사용 가능한 로컬 포트를 할당한다.
 func freePort(t *testing.T) string {
@@ -370,5 +385,39 @@ func TestHubLateSubscriber(t *testing.T) {
 	info := evts2[0].(StartedEvent).Info
 	if info.Codec != CodecH264 || info.SPS == nil {
 		t.Errorf("재전송된 Info 불일치: %+v", info)
+	}
+}
+
+// TestDialRTSPSSRCChange는 스트림 도중 SSRC가 바뀌어도 연결이 유지되고
+// 모든 패킷을 수신하는지 확인한다 (AllowSSRCChange 검증 — PythonCam 서버 대응).
+func TestDialRTSPSSRCChange(t *testing.T) {
+	ts := newTestRTSPServerOpt(t, true) // 중간 SSRC 변경 서버
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var (
+		mu       sync.Mutex
+		pktCount int
+		gotErr   error
+	)
+	err := DialRTSP(ctx, ts.url(), "tcp",
+		func(Info) {},
+		func(Packet) {
+			mu.Lock()
+			defer mu.Unlock()
+			pktCount++
+		},
+	)
+	mu.Lock()
+	defer mu.Unlock()
+	if err != nil && ctx.Err() == nil {
+		t.Errorf("DialRTSP() err = %v", err)
+	}
+	if gotErr != nil {
+		t.Errorf("수신 중 오류: %v", gotErr)
+	}
+	if pktCount < 10 {
+		t.Errorf("수신 패킷 수 = %d, want >= 10 (SSRC 변경 후에도 수신되어야 함)", pktCount)
 	}
 }

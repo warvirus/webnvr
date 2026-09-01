@@ -53,3 +53,5 @@ require (
 )
 
 // replace github.com/wailsapp/wails/v2 v2.10.1 => /Users/jason/go/pkg/mod
+
+replace github.com/bluenviron/gortsplib/v4 => ./third_party/gortsplib
