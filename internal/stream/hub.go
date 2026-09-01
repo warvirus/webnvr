@@ -19,6 +19,20 @@ type CameraSource interface {
 	StreamURL(cameraID string) (rawURL string, transport string, err error)
 }
 
+// StreamFailureNotifier는 스트림 실패를 소스 계층에 통지하는 옵셔널 인터페이스다.
+// (StreamService가 구현 — 실패 시 캐시된 URI를 폐기해 다음 시도가 재조회하게 한다)
+type StreamFailureNotifier interface {
+	// OnStreamFailed는 스트림이 비정상 종료되었음을 통지한다.
+	OnStreamFailed(cameraID string)
+}
+
+// notifyFailed는 소스가 StreamFailureNotifier를 구현하면 통지한다.
+func notifyFailed(src CameraSource, cameraID string) {
+	if n, ok := src.(StreamFailureNotifier); ok {
+		n.OnStreamFailed(cameraID)
+	}
+}
+
 // subscriber는 스트림 구독자 한 명이다.
 type subscriber struct {
 	ch    chan Event
@@ -66,6 +80,7 @@ func (h *Hub) Start(cameraID string) error {
 		h.mu.Lock()
 		delete(h.streams, cameraID)
 		h.mu.Unlock()
+		notifyFailed(h.src, cameraID)
 		return fmt.Errorf("스트림 URL 조회 실패: %w", err)
 	}
 
@@ -217,6 +232,9 @@ func (h *Hub) close(cameraID string, abnormal bool) {
 	}
 	if e.cancel != nil {
 		e.cancel()
+	}
+	if abnormal {
+		notifyFailed(h.src, cameraID)
 	}
 	reason := "정상 종료"
 	if abnormal {

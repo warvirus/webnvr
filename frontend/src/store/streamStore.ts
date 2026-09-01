@@ -41,7 +41,7 @@ let hub: DecoderHub | null = null;
 // 중요: 'starting'(연결/GOP 대기 진행 중)은 실패가 아니다 — 시도 시간 초과 시에만
 // 재시도한다. 그렇지 않으면 진행 중인 세션을 계속 리셋해 영상이 영원히 못 나온다.
 const RETRY_BASE_MS = 1_000;
-const RETRY_MAX_MS = 15_000;
+const RETRY_MAX_MS = 60_000; // 영구 오류(404 등) 시에도 서버 부하를 주지 않는다
 const ATTEMPT_TIMEOUT_MS = 20_000; // start_stream 후 성공/실패 판정 대기 상한 (dial 10s + GOP 여유)
 let nextRetryAt: Record<string, number> = {};      // 실패 백오프 예정 시각 (비반응형)
 let lastAttemptAt: Record<string, number> = {};    // 마지막 start_stream 전송 시각 (비반응형)

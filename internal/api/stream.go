@@ -19,8 +19,18 @@ type StreamService struct {
 	hub *stream.Hub
 
 	uriMu    sync.Mutex
-	uriCache map[string]string // cameraID → ONVIF 스트림 URI
+	uriCache map[string]cachedURI // cameraID → ONVIF 스트림 URI (TTL 있음)
 }
+
+// cachedURI는 ONVIF에서 조회한 스트림 URI의 캐시 항목이다.
+// 카메라 서버 재시작 시 RTSP 포트가 동적으로 바뀌므로 TTL을 둔다.
+type cachedURI struct {
+	uri       string
+	fetchedAt time.Time
+}
+
+// uriCacheTTL은 스트림 URI 캐시 유효 시간이다.
+const uriCacheTTL = 30 * time.Second
 
 // StreamStatus는 스트림 상태 조회 결과다.
 type StreamStatus struct {
@@ -32,7 +42,7 @@ type StreamStatus struct {
 
 // NewStreamService는 카메라 매니저 기반으로 스트림 서비스를 만든다.
 func NewStreamService(mgr *camera.Manager) *StreamService {
-	s := &StreamService{mgr: mgr, uriCache: map[string]string{}}
+	s := &StreamService{mgr: mgr, uriCache: map[string]cachedURI{}}
 	s.hub = stream.NewHub(s, nil)
 	return s
 }
@@ -78,14 +88,25 @@ func (s *StreamService) withONVIFClient(cam *camera.Camera, fn func(cli *onvif.C
 func (s *StreamService) cachedURI(id string) (string, bool) {
 	s.uriMu.Lock()
 	defer s.uriMu.Unlock()
-	u, ok := s.uriCache[id]
-	return u, ok
+	c, ok := s.uriCache[id]
+	if !ok || time.Since(c.fetchedAt) > uriCacheTTL {
+		return "", false // 만료 — 다음 시도에서 ONVIF로 재조회
+	}
+	return c.uri, true
 }
 
 func (s *StreamService) cacheURI(id, uri string) {
 	s.uriMu.Lock()
 	defer s.uriMu.Unlock()
-	s.uriCache[id] = uri
+	s.uriCache[id] = cachedURI{uri: uri, fetchedAt: time.Now()}
+}
+
+// OnStreamFailed는 스트림 실패를 통지받아 캐시된 URI를 폐기한다.
+// (카메라 서버 재시작 등으로 RTSP 포트가 바뀌었을 수 있으므로 다음 시도가 재조회하게 한다)
+func (s *StreamService) OnStreamFailed(cameraID string) {
+	s.uriMu.Lock()
+	defer s.uriMu.Unlock()
+	delete(s.uriCache, cameraID)
 }
 
 // Start는 스트림을 시작한다. (ws.Controller 구현)
