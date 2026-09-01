@@ -37,11 +37,14 @@ interface StreamStoreState {
 let hub: DecoderHub | null = null;
 
 // ── 자동 재연결(Desired-State Reconciler) ─────────────────────
-// desired[cameraId]=true인 스트림이 'streaming'이 아니면 지수 백오프로
-// start_stream을 재전송한다. 카메라 오프라인/연결 끊김/WS 재연결 모두 커버.
+// desired[cameraId]=true인 스트림이 'streaming'이 아니면 재시도한다.
+// 중요: 'starting'(연결/GOP 대기 진행 중)은 실패가 아니다 — 시도 시간 초과 시에만
+// 재시도한다. 그렇지 않으면 진행 중인 세션을 계속 리셋해 영상이 영원히 못 나온다.
 const RETRY_BASE_MS = 1_000;
 const RETRY_MAX_MS = 15_000;
-let nextRetryAt: Record<string, number> = {}; // 다음 시도 예정 시각 (비반응형)
+const ATTEMPT_TIMEOUT_MS = 20_000; // start_stream 후 성공/실패 판정 대기 상한 (dial 10s + GOP 여유)
+let nextRetryAt: Record<string, number> = {};      // 실패 백오프 예정 시각 (비반응형)
+let lastAttemptAt: Record<string, number> = {};    // 마지막 start_stream 전송 시각 (비반응형)
 let reconcileTimer: ReturnType<typeof setInterval> | null = null;
 
 function retryDelayMs(attempt: number): number {
@@ -50,34 +53,45 @@ function retryDelayMs(attempt: number): number {
 
 function ensureReconciler(): void {
   if (reconcileTimer) return;
-  reconcileTimer = setInterval(() => {
-    const s = useStreamStore.getState();
-    const now = Date.now();
-    let changed = false;
-    const patch: {states?: Record<string, StreamState>; retries?: Record<string, number>} = {};
-    for (const [cameraId, want] of Object.entries(s.desired)) {
-      if (!want) continue;
-      const st = s.states[cameraId];
-      if (st === 'streaming') {
-        if (s.retries[cameraId]) {
-          patch.retries = {...(patch.retries ?? s.retries), [cameraId]: 0};
-          nextRetryAt[cameraId] = 0;
-          changed = true;
-        }
-        continue;
+  reconcileTimer = setInterval(() => tickReconciler(), 1_000);
+}
+
+function tickReconciler(): void {
+  const s = useStreamStore.getState();
+  const now = Date.now();
+  const patchRetries: Record<string, number> = {};
+  let changed = false;
+
+  for (const [cameraId, want] of Object.entries(s.desired)) {
+    if (!want) continue;
+    const st = s.states[cameraId];
+    if (st === 'streaming') {
+      // 정상 출력 — 시도 카운터 리셋
+      if (s.retries[cameraId]) {
+        patchRetries[cameraId] = 0;
+        nextRetryAt[cameraId] = 0;
+        changed = true;
       }
-      // 재생 의사가 있는데 화면이 안 나오는 상태 → 백오프 후 재시도
-      if (now < (nextRetryAt[cameraId] ?? 0)) continue;
-      const attempt = (s.retries[cameraId] ?? 0) + 1;
-      nextRetryAt[cameraId] = now + retryDelayMs(attempt);
-      patch.retries = {...(patch.retries ?? s.retries), [cameraId]: attempt};
-      patch.states = {...(patch.states ?? s.states), [cameraId]: 'starting'};
-      changed = true;
-      getHub().reset(cameraId); // 이전 세션(포맷 전환 상태 등) 정리 후 신규 시작
-      wsService.send({type: 'start_stream', cameraId});
+      continue;
     }
-    if (changed) useStreamStore.setState(patch);
-  }, 1_000);
+
+    const last = lastAttemptAt[cameraId] ?? 0;
+    const attempt = s.retries[cameraId] ?? 0;
+    const elapsed = now - last;
+
+    // 진행 중인 시도는 상한(20초) 내에서는 건드리지 않는다
+    if (st === 'starting' && elapsed < ATTEMPT_TIMEOUT_MS) continue;
+    // 실패 상태는 백오프 대기 후 재시도
+    if ((st === 'error' || st === undefined) && elapsed < retryDelayMs(Math.max(attempt, 1))) continue;
+
+    // (재)시도
+    lastAttemptAt[cameraId] = now;
+    patchRetries[cameraId] = attempt + 1;
+    changed = true;
+    getHub().reset(cameraId); // 이전 세션 정리 후 신규 시작
+    wsService.send({type: 'start_stream', cameraId});
+  }
+  if (changed) useStreamStore.setState({retries: {...s.retries, ...patchRetries}});
 }
 
 function getHub(): DecoderHub {
@@ -96,8 +110,7 @@ function getHub(): DecoderHub {
           retries: {...s.retries, [cameraId]: 0},
           lastError: null,
         }));
-      },
-      onNotice: (cameraId, message) => {
+      },      onNotice: (cameraId, message) => {
         // 자가 치유 진행(포맷 전환 등) — 타일 상태는 유지하고 배너에만 표시
         useStreamStore.setState({lastError: message});
       },
@@ -208,6 +221,7 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
       } else {
         // 재연결 직후 리컨실리어가 즉시 desired 스트림을 복구하도록 백오프 해제
         nextRetryAt = {};
+        lastAttemptAt = {};
       }
     });
 
@@ -224,6 +238,7 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
     ensureReconciler();
     // 사용자 의도 등록 + 이전 세션/백오프 완전 초기화 후 신규 시작
     nextRetryAt[cameraId] = 0;
+    lastAttemptAt[cameraId] = Date.now();
     set(s => ({
       desired: {...s.desired, [cameraId]: true},
       retries: {...s.retries, [cameraId]: 0},
@@ -236,6 +251,7 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
   stopStream: (cameraId) => {
     // 사용자 의도 해제 — 자동 재연결 대상에서 제외
     nextRetryAt[cameraId] = 0;
+    delete lastAttemptAt[cameraId];
     set(s => ({
       desired: {...s.desired, [cameraId]: false},
       retries: {...s.retries, [cameraId]: 0},
