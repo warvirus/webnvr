@@ -74,11 +74,11 @@ func TestHubStartSubscribeStop(t *testing.T) {
 		t.Fatalf("재 Start() err = %v", err)
 	}
 
-	ch, cancel, err := hub.Subscribe("cam-1")
+	ch, cancel1, err := hub.Subscribe("cam-1")
 	if err != nil {
 		t.Fatalf("Subscribe() err = %v", err)
 	}
-	defer cancel()
+	defer cancel1()
 
 	evts := collectEvents(ch, 3*time.Second, func(evts []Event) bool {
 		return len(evts) >= 6 // started + 5 packets
@@ -106,12 +106,11 @@ func TestHubStartSubscribeStop(t *testing.T) {
 		t.Errorf("Running() = %v", hub.Running())
 	}
 
-	if err := hub.Stop("cam-1"); err != nil {
-		t.Fatalf("Stop() err = %v", err)
-	}
+	// 구독 해제 → 마지막 구독자이므로 세션도 종료되어야 한다 (참조 카운팅)
+	cancel1()
 	<-time.After(100 * time.Millisecond)
 	if _, ok := hub.Info("cam-1"); ok {
-		t.Error("정지 후에도 스트림이 실행 중으로 표시됨")
+		t.Error("구독 해제 후에도 스트림이 실행 중으로 표시됨")
 	}
 }
 
@@ -120,9 +119,6 @@ func TestHubNotRunning(t *testing.T) {
 	hub := NewHub(testCameraSource{urls: map[string]string{}}, nil)
 	if _, _, err := hub.Subscribe("nope"); err == nil {
 		t.Error("없는 스트림 구독이 성공함")
-	}
-	if err := hub.Stop("nope"); err == nil {
-		t.Error("없는 스트림 정지가 성공함")
 	}
 	if err := hub.Start("nope"); err == nil {
 		t.Error("URL 없는 카메라 시작이 성공함")
@@ -419,5 +415,47 @@ func TestDialRTSPSSRCChange(t *testing.T) {
 	}
 	if pktCount < 10 {
 		t.Errorf("수신 패킷 수 = %d, want >= 10 (SSRC 변경 후에도 수신되어야 함)", pktCount)
+	}
+}
+
+// TestHubRefCount는 참조 카운팅 의미론을 확인한다:
+// 두 구독자 중 하나가 해제되어도 세션은 유지되고, 둘 다 해제되면 종료된다.
+// (클라이언트별 독립 재생 — 2026-09-02 요구사항)
+func TestHubRefCount(t *testing.T) {
+	hub := NewHub(testCameraSource{urls: map[string]string{"cam-1": "rtsp://127.0.0.1:1/stream"}}, fakeDialer(100))
+
+	if err := hub.Start("cam-1"); err != nil {
+		t.Fatal(err)
+	}
+	_, cancel1, err := hub.Subscribe("cam-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch2, cancel2, err := hub.Subscribe("cam-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 첫 구독자 해제 → 세션은 유지되어야 한다
+	cancel1()
+	time.Sleep(100 * time.Millisecond)
+	if _, ok := hub.Info("cam-1"); !ok {
+		t.Fatal("한 구독자 해제 후 세션이 종료됨 (유지되어야 함)")
+	}
+
+	// 두 번째 구독자는 계속 패킷을 수신한다
+	got := collectEvents(ch2, 2*time.Second, func(evts []Event) bool {
+		_, ok := evts[0].(StartedEvent)
+		return ok && len(evts) >= 2
+	})
+	if len(got) < 2 {
+		t.Fatalf("잔여 구독자 이벤트 부족: %d", len(got))
+	}
+
+	// 두 번째 구독자 해제 → 세션 종료
+	cancel2()
+	time.Sleep(100 * time.Millisecond)
+	if _, ok := hub.Info("cam-1"); ok {
+		t.Error("모든 구독자 해제 후에도 세션이 유지됨 (종료되어야 함)")
 	}
 }

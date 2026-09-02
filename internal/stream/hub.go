@@ -40,10 +40,12 @@ type subscriber struct {
 }
 
 // activeStream은 실행 중인 스트림 하나다.
+// refs는 활성 구독자 수이며 0이 되면 세션이 자동 종료된다 (클라이언트별 재생 의미론).
 type activeStream struct {
 	cancel context.CancelFunc
 	subs   map[*subscriber]struct{}
 	info   Info
+	refs   int
 }
 
 // Hub는 카메라별 스트림을 관리하고 구독자에게 이벤트를 배포한다.
@@ -108,22 +110,8 @@ func (h *Hub) Start(cameraID string) error {
 	return nil
 }
 
-// Stop은 카메라 스트림을 중지한다. 실행 중이 아니면 오류를 반환한다.
-func (h *Hub) Stop(cameraID string) error {
-	h.mu.Lock()
-	e, ok := h.streams[cameraID]
-	if ok {
-		delete(h.streams, cameraID)
-	}
-	h.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("실행 중인 스트림이 없음: %s", cameraID)
-	}
-	e.cancel()
-	return nil
-}
-
-// StopAll은 모든 스트림을 중지한다.
+// StopAll은 모든 스트림을 강제 종료한다. (앱 종료 시 정리용)
+// 일반 클라이언트 요청으로는 사용하지 않는다 — 구독 해제가 세션 생애를 관리한다.
 func (h *Hub) StopAll() error {
 	h.mu.Lock()
 	ids := make([]string, 0, len(h.streams))
@@ -132,9 +120,7 @@ func (h *Hub) StopAll() error {
 	}
 	h.mu.Unlock()
 	for _, id := range ids {
-		if err := h.Stop(id); err != nil {
-			return err
-		}
+		h.closeSession(id)
 	}
 	return nil
 }
@@ -143,6 +129,8 @@ func (h *Hub) StopAll() error {
 // 스트림이 실행 중이어야 하며, 채널로 Started/Packet/Stopped 이벤트가 순서대로 전달된다.
 // 늦게 합류한 구독자(2번째 클라이언트 등)에게는 코덱 메타데이터(StartedEvent)를
 // 즉시 재전송한다 — 그렇지 않으면 디코더가 설정되지 않아 영상이 나오지 않는다.
+// 구독 해제 시 활성 구독자가 0이 되면 세션도 자동 종료된다(클라이언트별 재생 의미론:
+// 마지막 클라이언트가 모니터링을 떠나면 RTSP 연결도 해제한다).
 func (h *Hub) Subscribe(cameraID string) (<-chan Event, func(), error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -152,6 +140,7 @@ func (h *Hub) Subscribe(cameraID string) (<-chan Event, func(), error) {
 	}
 	s := &subscriber{ch: make(chan Event, subscriberBuf)}
 	e.subs[s] = struct{}{}
+	e.refs++
 	// 늦은 구독자 재전송: 패킷보다 반드시 앞서 도착해야 하므로 구독 등록 즉시 채널에 넣는다.
 	if e.info.Codec != "" {
 		select {
@@ -162,12 +151,37 @@ func (h *Hub) Subscribe(cameraID string) (<-chan Event, func(), error) {
 	}
 	cancel := func() {
 		h.mu.Lock()
-		defer h.mu.Unlock()
-		if cur, ok := h.streams[cameraID]; ok {
+		cur, ok := h.streams[cameraID]
+		if !ok {
+			h.mu.Unlock()
+			return
+		}
+		if _, present := cur.subs[s]; present {
 			delete(cur.subs, s)
+			cur.refs--
+		}
+		lastRef := cur.refs <= 0
+		h.mu.Unlock()
+
+		// 마지막 구독자가 떠났으면 RTSP 세션도 해제한다 (락 밖에서 호출).
+		if lastRef {
+			h.closeSession(cameraID)
 		}
 	}
 	return s.ch, cancel, nil
+}
+
+// closeSession은 카메라의 RTSP 세션을 종료하고 스트림 목록에서 제거한다.
+func (h *Hub) closeSession(cameraID string) {
+	h.mu.Lock()
+	e, ok := h.streams[cameraID]
+	if ok {
+		delete(h.streams, cameraID)
+	}
+	h.mu.Unlock()
+	if ok && e.cancel != nil {
+		e.cancel()
+	}
 }
 
 // Info는 실행 중인 스트림의 코덱 메타데이터를 반환한다.

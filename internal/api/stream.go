@@ -114,10 +114,7 @@ func (s *StreamService) Start(cameraID string) error {
 	return s.hub.Start(cameraID)
 }
 
-// Stop은 스트림을 정지한다. (ws.Controller 구현)
-func (s *StreamService) Stop(cameraID string) error {
-	return s.hub.Stop(cameraID)
-}
+
 
 // StartAll은 활성화된 모든 카메라의 스트림을 시작한다. (ws.Controller 구현)
 func (s *StreamService) StartAll() error {
@@ -137,10 +134,7 @@ func (s *StreamService) StartAll() error {
 	return firstErr
 }
 
-// StopAll은 모든 스트림을 정지한다. (ws.Controller 구현)
-func (s *StreamService) StopAll() error {
-	return s.hub.StopAll()
-}
+
 
 // Subscribe는 스트림 이벤트 채널을 구독한다. (ws.Controller 구현)
 func (s *StreamService) Subscribe(cameraID string) (<-chan stream.Event, func(), error) {
@@ -185,21 +179,6 @@ func (s *StreamService) PTZ(cameraID string, cmd ws.PTZCommand) error {
 // StartStream은 카메라 스트림을 시작한다.
 func (s *StreamService) StartStream(cameraID string) error {
 	return s.hub.Start(cameraID)
-}
-
-// StopStream은 카메라 스트림을 정지한다.
-func (s *StreamService) StopStream(cameraID string) error {
-	return s.hub.Stop(cameraID)
-}
-
-// StartAllStreams는 활성화된 모든 카메라 스트림을 시작한다.
-func (s *StreamService) StartAllStreams() error {
-	return s.StartAll()
-}
-
-// StopAllStreams는 모든 카메라 스트림을 정지한다.
-func (s *StreamService) StopAllStreams() error {
-	return s.StopAll()
 }
 
 // GetStreamStatus는 스트림 상태를 반환한다.

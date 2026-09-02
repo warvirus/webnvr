@@ -1,6 +1,6 @@
 // 상단 헤더: 페이지 제목과 주요 동작 (모니터링 제어 포함 — doc 4.7)
 import React from 'react';
-import {IconPlus, IconPlay, IconStop, IconFull} from '../common/Icons';
+import {IconPlus, IconFull} from '../common/Icons';
 import {useUIStore} from '../../store/uiStore';
 import {GridMode} from '../../types';
 import {selectOrderedCameras, useCameraStore} from '../../store/cameraStore';
@@ -28,14 +28,11 @@ export function Toolbar() {
   const openCameraModal = useUIStore(s => s.openCameraModal);
   const gridMode = useUIStore(s => s.gridMode);
   const setGridMode = useUIStore(s => s.setGridMode);
-  const pushToast = useUIStore(s => s.pushToast);
 
   const cameras = useCameraStore(s => s.cameras);
 
   const streamingCount = useStreamStore(s =>
     Object.values(s.states).filter(st => st === 'streaming').length);
-  const startAllStreams = useStreamStore(s => s.startAllStreams);
-  const stopAllStreams = useStreamStore(s => s.stopAllStreams);
 
   const titles: Record<string, {eyebrow: string; title: string}> = {
     monitoring: {eyebrow: 'Live Grid', title: '모니터링'},
@@ -81,24 +78,6 @@ export function Toolbar() {
                 ))}
               </select>
             </div>
-            {streamingCount > 0 ? (
-              <button className="btn btn-danger" onClick={() => {
-                stopAllStreams();
-                pushToast('info', '모든 스트림을 정지했습니다.');
-              }}>
-                <IconStop size={14}/> 전체 정지
-              </button>
-            ) : (
-              <button className="btn btn-primary" onClick={() => {
-                if (enabled.length === 0) {
-                  pushToast('info', '사용 중인 카메라가 없습니다. 카메라 관리에서 사용 상태로 전환하세요.');
-                  return;
-                }
-                startAllStreams(enabled.map(c => c.id));
-              }}>
-                <IconPlay size={14}/> 전체 시작
-              </button>
-            )}
             <button className="btn" title="전체화면 전환" onClick={toggleFullscreen}>
               <IconFull size={14}/> 전체화면
             </button>

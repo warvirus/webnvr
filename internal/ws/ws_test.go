@@ -235,7 +235,7 @@ func TestStartStreamPump(t *testing.T) {
 		t.Errorf("payload base64 불일치: %q", p0.Payload)
 	}
 
-	// 정지
+	// 정지 — 새 의미론: 이 연결의 구독 해제만 (세션 정지 없음)
 	if err := c.WriteJSON(ClientMsg{Type: MsgStopStream, CameraID: "cam-1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -244,10 +244,12 @@ func TestStartStreamPump(t *testing.T) {
 		t.Errorf("stream_stopped 불일치: %+v", m3)
 	}
 
+	// 정지 후 이벤트가 오면 더 이상 수신되지 않아야 한다 (구독 해제됨)
 	ctrl.mu.Lock()
-	defer ctrl.mu.Unlock()
-	if len(ctrl.stopped) != 1 || ctrl.stopped[0] != "cam-1" {
-		t.Errorf("Controller.Stop 호출 기록: %v", ctrl.stopped)
+	remaining := len(ctrl.chans["cam-1"])
+	ctrl.mu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("구독 해제 후에도 채널이 남아있음: %d", remaining)
 	}
 }
 
@@ -350,5 +352,48 @@ func TestTwoClientsSameStream(t *testing.T) {
 	ctrl.emit(t, "cam-1", stream.PacketEvent{Packet: stream.Packet{Sequence: 3, Payload: []byte{7}}})
 	if m := recv(t, cA); m.Type != MsgRTPBatch {
 		t.Errorf("A의 후속 배치 미수신: %+v", m)
+	}
+}
+
+// TestClientIndependentStop는 한 연결의 stop_stream이 다른 연결에 영향을 주지 않음을 확인한다.
+// (클라이언트별 독립 재생 — 2026-09-02 요구사항)
+func TestClientIndependentStop(t *testing.T) {
+	ctrl := newFakeController()
+	srv := newTestServer(t, ctrl)
+
+	// A, B 둘 다 구독
+	cA := connect(t, srv)
+	if err := cA.WriteJSON(ClientMsg{Type: MsgStartStream, CameraID: "cam-1"}); err != nil {
+		t.Fatal(err)
+	}
+	ctrl.waitSubs(t, "cam-1", 1)
+
+	cB := connect(t, srv)
+	if err := cB.WriteJSON(ClientMsg{Type: MsgSubscribe, CameraID: "cam-1"}); err != nil {
+		t.Fatal(err)
+	}
+	ctrl.waitSubs(t, "cam-1", 2)
+
+	// B만 정지
+	if err := cB.WriteJSON(ClientMsg{Type: MsgStopStream, CameraID: "cam-1"}); err != nil {
+		t.Fatal(err)
+	}
+	mB := recv(t, cB)
+	if mB.Type != MsgStreamStopped {
+		t.Fatalf("B의 stream_stopped 미수신: %+v", mB)
+	}
+
+	// B 정지 후에도 A는 계속 패킷을 수신한다
+	ctrl.emit(t, "cam-1", stream.PacketEvent{Packet: stream.Packet{Sequence: 10, Payload: []byte{1}}})
+	mA := recv(t, cA)
+	if mA.Type != MsgRTPBatch {
+		t.Errorf("B 정지 후 A의 수신 단절: %+v", mA)
+	}
+
+	// A의 구독이 유지되었는지 (컨트롤러 기록)
+	ctrl.mu.Lock()
+	defer ctrl.mu.Unlock()
+	if len(ctrl.stopped) != 0 {
+		t.Errorf("B의 정지가 세션 정지로 전파됨: stopped=%v", ctrl.stopped)
 	}
 }

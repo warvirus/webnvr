@@ -1,5 +1,5 @@
-// 모니터링 페이지 — 카메라 그리드 + 스트림 상태 + PTZ 패널
-// (전체 시작/정지, 레이아웃 선택은 Toolbar에 있음 — doc 4.7)
+// 모니터링 페이지 — 진입 시 자동 시작, 이탈 시 정지 (클라이언트별 독립 재생, 2026-09-02)
+// PTZ 패널은 선택된 PTZ 카메라에만 표시된다.
 import React, {useEffect, useMemo, useState} from 'react';
 import {CameraGrid} from '../components/grid/CameraGrid';
 import {PTZControl} from '../components/grid/PTZControl';
@@ -20,6 +20,7 @@ export function MonitoringPage() {
   const connected = useStreamStore(s => s.connected);
   const lastError = useStreamStore(s => s.lastError);
   const startStream = useStreamStore(s => s.startStream);
+  const stopStream = useStreamStore(s => s.stopStream);
   const init = useStreamStore(s => s.init);
   const clearError = () => useStreamStore.setState({lastError: null});
   const pushToast = useUIStore(s => s.pushToast);
@@ -33,6 +34,18 @@ export function MonitoringPage() {
   useEffect(() => {
     fetchCameras().catch(err => pushToast('error', `카메라 목록 조회 실패: ${String(err)}`));
   }, [fetchCameras, pushToast]);
+
+  // ── 클라이언트별 재생 라이프사이클 ──
+  // 진입(마운트): 활성화된 카메라 전체 자동 시작
+  // 이탈(언마운트): 이 클라이언트의 모든 구독 해제 + 자동 재연결 의사 해제
+  // 다른 클라이언트의 화면 전환은 백엔드 참조 카운팅이 관리하므로 무영향이다.
+  useEffect(() => {
+    const enabledIds = cameras.filter(c => c.enabled).map(c => c.id);
+    enabledIds.forEach(id => startStream(id));
+    return () => {
+      enabledIds.forEach(id => stopStream(id));
+    };
+  }, [cameras, startStream, stopStream]);
 
   const streamingCount = useMemo(
     () => Object.values(states).filter(st => st === 'streaming').length,
@@ -80,12 +93,6 @@ export function MonitoringPage() {
       />
 
       <StatsPanel/>
-
-      {streamingCount === 0 && (
-        <div className="empty" style={{padding: '24px'}}>
-          <p>스트림이 중지되어 있습니다. 상단의 <b>전체 시작</b> 버튼으로 모니터링을 시작하세요.</p>
-        </div>
-      )}
 
       {showPtz && selectedCamera && (
         <section className="discovery" aria-label="PTZ 제어 패널">

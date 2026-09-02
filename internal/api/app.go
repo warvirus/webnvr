@@ -185,5 +185,4 @@ func (a *App) StopWSServer() {
 			slog.Warn("WS 서버 정지 실패", "err", err)
 		}
 	}
-	_ = a.Stream.StopAll()
 }

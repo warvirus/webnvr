@@ -15,9 +15,7 @@ import (
 // Controller는 WS 계층이 필요로 하는 스트림 제어 연산이다. (api.StreamService가 구현)
 type Controller interface {
 	Start(cameraID string) error
-	Stop(cameraID string) error
 	StartAll() error
-	StopAll() error
 	Subscribe(cameraID string) (<-chan stream.Event, func(), error)
 	PTZ(cameraID string, cmd PTZCommand) error
 }
@@ -183,7 +181,7 @@ func (s *connState) handleClientMsg(ctrl Controller, m ClientMsg) {
 	case MsgSubscribe:
 		s.startStream(ctrl, m.CameraID)
 	case MsgStopStream:
-		s.stopStream(ctrl, m.CameraID, "사용자 정지")
+		s.stopStream(m.CameraID, "사용자 정지")
 	case MsgUnsubscribe:
 		s.unsubscribe(m.CameraID)
 	case MsgStartAllStreams:
@@ -191,8 +189,9 @@ func (s *connState) handleClientMsg(ctrl Controller, m ClientMsg) {
 			s.handleError("", err.Error())
 		}
 	case MsgStopAllStreams:
-		if err := ctrl.StopAll(); err != nil {
-			s.handleError("", err.Error())
+		// v1.1 의미 변경: 전역 정지가 아니라 "이 클라이언트의 모든 구독 해제"
+		for _, cameraID := range s.ownCameraIDs() {
+			s.stopStream(cameraID, "사용자 정지")
 		}
 	case MsgPTZ:
 		if m.Command == nil {
@@ -211,13 +210,21 @@ func (s *connState) handleClientMsg(ctrl Controller, m ClientMsg) {
 	}
 }
 
-// stopStream은 구독을 해제하고 스트림을 정지한다.
-func (s *connState) stopStream(ctrl Controller, cameraID, reason string) {
-	s.unsubscribe(cameraID)
-	if err := ctrl.Stop(cameraID); err != nil {
-		s.handleError(cameraID, err.Error())
-		return
+// ownCameraIDs는 이 연결이 구독 중인 카메라 ID 목록을 반환한다.
+func (s *connState) ownCameraIDs() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.cancels))
+	for id := range s.cancels {
+		out = append(out, id)
 	}
+	return out
+}
+
+// stopStream은 이 연결의 구독만 해제한다.
+// RTSP 세션은 허브의 참조 카운팅이 관리 — 다른 클라이언트 구독에는 영향 없다.
+func (s *connState) stopStream(cameraID, reason string) {
+	s.unsubscribe(cameraID)
 	s.sendMsg(ServerMsg{Type: MsgStreamStopped, CameraID: cameraID, Reason: reason})
 }
 
