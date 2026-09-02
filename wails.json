@@ -4,7 +4,7 @@
   "outputfilename": "webnvr",
   "frontend:install": "npm install",
   "frontend:build": "npm run build",
-  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:watcher": "npm run dev -- --host 0.0.0.0",
   "frontend:dev:serverUrl": "auto",
   "author": {
     "name": "Jason Lee",
