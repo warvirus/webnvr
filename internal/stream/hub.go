@@ -141,13 +141,14 @@ func (h *Hub) Subscribe(cameraID string) (<-chan Event, func(), error) {
 	s := &subscriber{ch: make(chan Event, subscriberBuf)}
 	e.subs[s] = struct{}{}
 	e.refs++
-	// 늦은 구독자 재전송: 조건 없이 항상 현재 정보를 즉시 보낸다.
-	// setInfo와 Subscribe의 순서 상관없이, 모든 구독자가 코덱 메타를 받을 수 있다.
-	// 아직 설정되지 않았으면 빈 Info를 보내고, 나중에 publish(StartedEvent)가 완전한 정보를 전달한다.
-	select {
-	case s.ch <- StartedEvent{Info: e.info}:
-	default:
-		// 채널 포화는 불가능(방금 생성) — 방어용
+	// 늦은 구독자 재전송: 정보가 완전해진 후에만 전송한다.
+	// 빈 Info는 디코더 설정 실패를 초래하므로 보내지 않는다.
+	if e.info.Codec != "" {
+		select {
+		case s.ch <- StartedEvent{Info: e.info}:
+		default:
+			// 채널 포화는 불가능(방금 생성) — 방어용
+		}
 	}
 	cancel := func() {
 		h.mu.Lock()

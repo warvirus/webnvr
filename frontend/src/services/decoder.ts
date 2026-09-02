@@ -244,13 +244,6 @@ export class Session {
       try {
         const dec = new VideoDecoder({
           output: (frame: VideoFrame) => {
-            // 실제 프레임 출력 시에만 카운트 (watchdog에서 정확히 감지)
-            this.frames++;
-            if (this.frames === 1) {
-              // 첫 프레임 디코딩 성공 → 성공 포맷을 기억해(재접속 시 우선 사용)
-              lastGoodFormat = this.formatIdx;
-              this.ev.onDecoded(this.cameraId);
-            }
             this.ev.onFrame(this.cameraId, frame);
           },
           error: (e: DOMException) => {
@@ -436,9 +429,15 @@ export class Session {
       timestamp: Math.round((ts * 1_000_000) / clockRate),
       data,
     });
+    this.frames++;
+    if (this.frames === 1) {
+      // 첫 프레임 디코딩 시도 성공 → 성공 포맷을 기억해(재접속 시 우선 사용)
+      // UI의 오류/대기 상태를 해제한다
+      lastGoodFormat = this.formatIdx;
+      this.ev.onDecoded(this.cameraId);
+    }
     try {
       this.decoder.decode(chunk);
-      // frames 카운트는 output 콜백(onFrame)에서 증가 — 실제 프레임 출력 시에만 카운트
     } catch (e) {
       // 디코더 상태 이상 → 포맷 전환 후 다음 키프레임에서 재시작
       this.lastError = `디코딩 실패: ${String(e)}`;

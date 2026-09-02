@@ -81,18 +81,15 @@ func TestHubStartSubscribeStop(t *testing.T) {
 	defer cancel1()
 
 	evts := collectEvents(ch, 3*time.Second, func(evts []Event) bool {
-		return len(evts) >= 7 // started(sync) + started(async) + 5 packets
+		return len(evts) >= 6 // started + 5 packets
 	})
-	if len(evts) < 7 {
+	if len(evts) < 6 {
 		t.Fatalf("이벤트 부족: %d", len(evts))
 	}
 	if _, ok := evts[0].(StartedEvent); !ok {
 		t.Errorf("첫 이벤트가 StartedEvent가 아님: %T", evts[0])
 	}
-	if _, ok := evts[1].(StartedEvent); !ok {
-		t.Errorf("두 번째 이벤트가 StartedEvent가 아님: %T", evts[1])
-	}
-	for i := 2; i <= 6; i++ {
+	for i := 1; i <= 5; i++ {
 		pe, ok := evts[i].(PacketEvent)
 		if !ok {
 			t.Fatalf("%d번째 이벤트가 PacketEvent가 아님: %T", i, evts[i])
@@ -351,24 +348,18 @@ func TestHubLateSubscriber(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 첫 구독자가 완전한 Started(Codec+SPS 설정)를 받을 때까지 대기
+	// 첫 구독자가 Started를 받을 때까지 대기 (코덱 정보 확정)
 	ch1, cancel1, err := hub.Subscribe("cam-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cancel1()
 	evts1 := collectEvents(ch1, 2*time.Second, func(evts []Event) bool {
-		if len(evts) < 2 {
-			return false
-		}
-		// 두 번째 Started가 완전한 정보를 가졌는지 확인
-		if se, ok := evts[1].(StartedEvent); ok {
-			return se.Info.Codec != ""
-		}
-		return false
+		_, ok := evts[0].(StartedEvent)
+		return ok
 	})
-	if len(evts1) < 2 {
-		t.Fatal("첫 구독자 완전한 Started 미수신")
+	if len(evts1) == 0 {
+		t.Fatal("첫 구독자 Started 미수신")
 	}
 
 	// 늦은 구독자 합류 — 코덱 정보가 이미 확정된 상태
