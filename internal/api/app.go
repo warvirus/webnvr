@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 
 	"webnvr/internal/camera"
 	"webnvr/internal/config"
+	"webnvr/internal/logging"
 	"webnvr/internal/ws"
 )
 
@@ -22,7 +24,8 @@ type App struct {
 	Camera *CameraService
 	Stream *StreamService
 
-	wsServer *ws.Server
+	wsServer   *ws.Server
+	logCloser  io.Closer
 }
 
 // New는 설정 디렉토리를 기준으로 모든 서비스를 초기화한다.
@@ -34,20 +37,30 @@ func New(configDir string) (*App, error) {
 	if err := config.Validate(appCfg); err != nil {
 		return nil, fmt.Errorf("앱 설정 검증 실패: %w", err)
 	}
+
+	// 로거 초기화 (설정 검증 직후, 이 시점부터 모든 slog 호출이 파일에 기록됨)
+	logCloser, err := logging.Setup(appCfg.Logging)
+	if err != nil {
+		return nil, fmt.Errorf("로거 설정 실패: %w", err)
+	}
+
 	store, err := camera.NewJSONCameraStore(fmt.Sprintf("%s/cameras.json", configDir))
 	if err != nil {
+		logCloser.Close()
 		return nil, fmt.Errorf("카메라 저장소 초기화 실패: %w", err)
 	}
 	mgr := camera.NewManager(store)
 
 	if err := ensureMasterKey(configDir, mgr); err != nil {
+		logCloser.Close()
 		return nil, err
 	}
 
 	cameraSvc := &CameraService{mgr: mgr, appCfg: appCfg, configDir: configDir}
 	return &App{
-		Camera: cameraSvc,
-		Stream: NewStreamService(mgr),
+		Camera:    cameraSvc,
+		Stream:    NewStreamService(mgr),
+		logCloser: logCloser,
 	}, nil
 }
 
@@ -134,7 +147,7 @@ func (a *App) StartWSServer(assets http.FileSystem) error {
 		registerUI(mux, assets)
 	}
 
-	if err := a.wsServer.StartWithHandler(CORS(mux)); err != nil {
+	if err := a.wsServer.StartWithHandler(AccessLog(CORS(mux))); err != nil {
 		return err
 	}
 	if bind != "127.0.0.1" && bind != "localhost" {
@@ -186,5 +199,13 @@ func (a *App) StopWSServer() {
 		if err := a.wsServer.Stop(); err != nil {
 			slog.Warn("WS 서버 정지 실패", "err", err)
 		}
+	}
+}
+
+// Close는 서버와 로거를 정지하고 리소스를 정리한다.
+func (a *App) Close() {
+	a.StopWSServer()
+	if a.logCloser != nil {
+		_ = a.logCloser.Close()
 	}
 }

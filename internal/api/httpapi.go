@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // httpError는 서비스 오류를 HTTP 상태 코드로 매핑한다.
@@ -45,6 +47,29 @@ func writeErr(w http.ResponseWriter, err error) {
 		return
 	}
 	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+}
+
+// statusRecorder는 응답 상태 코드를 캡처하는 ResponseWriter 래퍼다.
+type statusRecorder struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (sr *statusRecorder) WriteHeader(code int) {
+	sr.statusCode = code
+	sr.ResponseWriter.WriteHeader(code)
+}
+
+// AccessLog는 HTTP 요청/응답을 로깅하는 미들웨어다.
+// 모든 요청(API/WS/정적 UI)의 경로, 메서드, 상태 코드, 소요 시간을 기록한다.
+func AccessLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		sr := &statusRecorder{ResponseWriter: w, statusCode: http.StatusOK}
+		next.ServeHTTP(sr, r)
+		duration := time.Since(start).Milliseconds()
+		slog.Info("HTTP", "method", r.Method, "path", r.URL.Path, "status", sr.statusCode, "duration_ms", duration)
+	})
 }
 
 // CORS는 DevServer 등 크로스 오리진 접근을 허용하는 미들웨어다.

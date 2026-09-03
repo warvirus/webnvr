@@ -10,6 +10,7 @@ require (
 	github.com/pion/rtp v1.8.21
 	github.com/use-go/onvif v0.0.9
 	github.com/wailsapp/wails/v2 v2.10.1
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
 require (
