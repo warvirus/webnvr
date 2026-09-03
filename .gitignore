@@ -127,4 +127,4 @@ core
 core.*
 *.pid
 *.lock
-nohup.out
+nohup.out/webnvr-server
