@@ -220,7 +220,10 @@ func (s *CameraService) ReorderCameras(cameraIDs []string) error {
 
 // DiscoverONVIFCameras는 로컬 네트워크의 ONVIF 카메라를 검색한다.
 func (s *CameraService) DiscoverONVIFCameras() ([]DiscoveredCamera, error) {
-	found, err := onvif.Discover(s.appCfg.Discovery.ScanInterfaces)
+	found, err := onvif.Discover(
+		s.appCfg.Discovery.ScanInterfaces,
+		time.Duration(s.appCfg.Discovery.ScanTimeoutMS)*time.Millisecond,
+	)
 	if err != nil {
 		return nil, err
 	}

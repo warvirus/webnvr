@@ -70,7 +70,7 @@ func Default() *AppConfig {
 		},
 		Discovery: DiscoveryConfig{
 			ScanTimeoutMS:       3000,
-			ScanInterfaces:      []string{"en0", "eth0"},
+			ScanInterfaces:      []string{}, // 빈 값 = 활성 인터페이스 자동 열거 (플랫폼 무관)
 			AutoScanIntervalMin: 30,
 		},
 		Decoder: DecoderConfig{

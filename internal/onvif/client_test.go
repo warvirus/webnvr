@@ -186,25 +186,45 @@ func TestXAddrHost(t *testing.T) {
 	}
 }
 
-// TestProbeResponseParsing은 WS-Discovery 응답 XML 파싱을 확인한다.
-func TestProbeResponseParsing(t *testing.T) {
-	reply := `<?xml version="1.0"?>
-<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:a="http://schemas.xmlsoap.org/ws/2004/08/addressing" xmlns:d="http://schemas.xmlsoap.org/ws/2005/04/discovery">
-<s:Header><a:EndpointReference><a:Address>urn:uuid:1234</a:Address></a:EndpointReference></s:Header>
+// TestProbeReplyParsing은 벤더별 WS-Discovery 응답 구조 파싱을 확인한다.
+func TestProbeReplyParsing(t *testing.T) {
+	// (1) 표준: ProbeMatches 래퍼 + d: 접두어
+	spec := `<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:d="http://schemas.xmlsoap.org/ws/2005/04/discovery">
 <s:Body><d:ProbeMatches><d:ProbeMatch>
-<d:Types>dn:NetworkVideoTransmitter</d:Types>
 <d:Scopes>onvif://www.onvif.org/Profile/Streaming onvif://www.onvif.org/name/FrontDoor</d:Scopes>
 <d:XAddrs>http://192.168.0.217:8090/onvif/device_service</d:XAddrs>
 </d:ProbeMatch></d:ProbeMatches></s:Body></s:Envelope>`
+	// (2) 비표준(PythonCam): ProbeMatches 래퍼 없음, 이름에 공백
+	loose := `<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:d="http://schemas.xmlsoap.org/ws/2005/04/discovery">
+  <soap:Body>
+    <d:ProbeMatch>
+      <d:Types>dn:NetworkVideoTransmitter tds:Device</d:Types>
+      <d:Scopes>onvif://www.onvif.org/type/video_encoder onvif://www.onvif.org/name/Virtual Camera 1</d:Scopes>
+      <d:XAddrs>http://192.168.0.217:8090/onvif/device_service</d:XAddrs>
+    </d:ProbeMatch>
+  </soap:Body>
+</soap:Envelope>`
 
-	var pr probeResponse
-	if err := unmarshalProbe(reply, &pr); err != nil {
-		t.Fatalf("unmarshalProbe() err = %v", err)
+	x, s := parseReply(spec)
+	if len(x) != 1 || xaddrHost(x[0]) != "192.168.0.217:8090" {
+		t.Errorf("표준 XAddrs 파싱 실패: %v", x)
 	}
-	if got := xaddrHost(pr.XAddrs); got != "192.168.0.217:8090" {
-		t.Errorf("XAddrs host = %q", got)
+	if got := extractName(s); got != "FrontDoor" {
+		t.Errorf("표준 name = %q", got)
 	}
-	if got := extractName(pr.Scopes); got != "FrontDoor" {
-		t.Errorf("extractName = %q", got)
+
+	x, s = parseReply(loose)
+	if len(x) != 1 || xaddrHost(x[0]) != "192.168.0.217:8090" {
+		t.Errorf("비표준 XAddrs 파싱 실패: %v", x)
+	}
+	if got := extractName(s); got != "Virtual Camera 1" {
+		t.Errorf("비표준(공백 포함) name = %q, want %q", got, "Virtual Camera 1")
+	}
+
+	// %20 인코딩된 이름
+	if got := extractName("onvif://x/name/Front%20Door"); got != "Front Door" {
+		t.Errorf("%%20 디코딩 실패: %q", got)
 	}
 }
