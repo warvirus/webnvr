@@ -36,6 +36,8 @@ $RECYCLE.BIN/
 # 공통 (에디터/쉘)
 .idea/
 .vscode/*.user
+.env
+.envrc
 
 # 실행 바이너리
 *.exe
