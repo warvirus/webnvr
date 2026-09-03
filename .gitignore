@@ -5,8 +5,11 @@ frontend/dist
 # go build으로 생성되는 로컬 바이너리
 /webnvr
 
-# 런타임 생성 설정
+# 런타임 생성 설정 + SQLite DB
 /config/
+*.db
+*.db-wal
+*.db-shm
 
 # macOS
 .DS_Store

@@ -19,6 +19,7 @@ import (
 	"github.com/pion/rtp"
 
 	"webnvr/internal/camera"
+	"webnvr/internal/db"
 	"webnvr/internal/onvif"
 )
 
@@ -38,11 +39,12 @@ func main() {
 	if *cameraID == "" {
 		log.Fatal("-camera 필요")
 	}
-	store, err := camera.NewJSONCameraStore("config/cameras.json")
+	database, err := db.Open("config")
 	if err != nil {
 		log.Fatal(err)
 	}
-	mgr := camera.NewManager(store)
+	defer database.Close()
+	mgr := camera.NewManager(camera.NewSQLCameraStore(database.SQL()))
 	cam, err := mgr.Get(*cameraID)
 	if err != nil {
 		log.Fatal(err)

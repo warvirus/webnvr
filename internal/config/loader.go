@@ -22,10 +22,15 @@ func Load(path string) (*AppConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("설정 파일 읽기 실패: %w", err)
 	}
+	return Parse(b)
+}
 
+// Parse는 설정 JSON 바이트를 기본값 위에 언마샬하고 버전을 검사한다.
+// (파일/DB 등 저장 매체에 무관하게 공유되는 파싱 경로다.)
+func Parse(b []byte) (*AppConfig, error) {
 	cfg := Default()
 	if err := json.Unmarshal(b, cfg); err != nil {
-		return nil, fmt.Errorf("설정 파일 파싱 실패: %w", err)
+		return nil, fmt.Errorf("설정 파싱 실패: %w", err)
 	}
 	if err := checkVersion(cfg.Version); err != nil {
 		return nil, err
@@ -33,12 +38,17 @@ func Load(path string) (*AppConfig, error) {
 	return cfg, nil
 }
 
+// Bytes는 설정을 버전 검사 후 들여쓴 JSON으로 직렬화한다.
+func Bytes(cfg *AppConfig) ([]byte, error) {
+	if err := checkVersion(cfg.Version); err != nil {
+		return nil, err
+	}
+	return json.MarshalIndent(cfg, "", "  ")
+}
+
 // Save는 설정을 원자적으로(attempt: 임시 파일 쓰기 후 rename) 파일에 기록한다.
 func Save(path string, cfg *AppConfig) error {
-	if err := checkVersion(cfg.Version); err != nil {
-		return err
-	}
-	b, err := json.MarshalIndent(cfg, "", "  ")
+	b, err := Bytes(cfg)
 	if err != nil {
 		return fmt.Errorf("설정 직렬화 실패: %w", err)
 	}

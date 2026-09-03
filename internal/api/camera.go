@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"webnvr/internal/camera"
 	"webnvr/internal/config"
+	"webnvr/internal/db"
 	"webnvr/internal/onvif"
 )
 
@@ -133,6 +133,7 @@ type CameraService struct {
 	mgr       *camera.Manager
 	appCfg    *config.AppConfig
 	configDir string
+	database  *db.DB
 }
 
 // SetConfigDir는 설정 디렉토리를 지정한다. (App 조립 시 호출)
@@ -374,7 +375,7 @@ func (s *CameraService) UpdateAppConfig(raw map[string]any) (*config.AppConfig, 
 	if err := config.Validate(cfg); err != nil {
 		return nil, err
 	}
-	if err := config.Save(filepath.Join(s.configDir, "app.json"), cfg); err != nil {
+	if err := s.database.SaveConfig(cfg); err != nil {
 		return nil, err
 	}
 	s.appCfg = cfg

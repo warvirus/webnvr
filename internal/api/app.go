@@ -15,6 +15,7 @@ import (
 
 	"webnvr/internal/camera"
 	"webnvr/internal/config"
+	"webnvr/internal/db"
 	"webnvr/internal/logging"
 	"webnvr/internal/ws"
 )
@@ -24,43 +25,50 @@ type App struct {
 	Camera *CameraService
 	Stream *StreamService
 
-	wsServer   *ws.Server
-	logCloser  io.Closer
+	wsServer  *ws.Server
+	logCloser io.Closer
+	database  *db.DB
 }
 
 // New는 설정 디렉토리를 기준으로 모든 서비스를 초기화한다.
 func New(configDir string) (*App, error) {
-	appCfg, err := config.Load(fmt.Sprintf("%s/app.json", configDir))
+	// SQLite 저장소 초기화 (스키마 적용 + 기존 config/*.json 1회 이관)
+	database, err := db.Open(configDir)
 	if err != nil {
+		return nil, fmt.Errorf("저장소 초기화 실패: %w", err)
+	}
+
+	appCfg, err := database.LoadConfig()
+	if err != nil {
+		database.Close()
 		return nil, fmt.Errorf("앱 설정 로드 실패: %w", err)
 	}
 	if err := config.Validate(appCfg); err != nil {
+		database.Close()
 		return nil, fmt.Errorf("앱 설정 검증 실패: %w", err)
 	}
 
 	// 로거 초기화 (설정 검증 직후, 이 시점부터 모든 slog 호출이 파일에 기록됨)
 	logCloser, err := logging.Setup(appCfg.Logging)
 	if err != nil {
+		database.Close()
 		return nil, fmt.Errorf("로거 설정 실패: %w", err)
 	}
 
-	store, err := camera.NewJSONCameraStore(fmt.Sprintf("%s/cameras.json", configDir))
-	if err != nil {
-		logCloser.Close()
-		return nil, fmt.Errorf("카메라 저장소 초기화 실패: %w", err)
-	}
-	mgr := camera.NewManager(store)
+	mgr := camera.NewManager(camera.NewSQLCameraStore(database.SQL()))
 
 	if err := ensureMasterKey(configDir, mgr); err != nil {
 		logCloser.Close()
+		database.Close()
 		return nil, err
 	}
 
-	cameraSvc := &CameraService{mgr: mgr, appCfg: appCfg, configDir: configDir}
+	cameraSvc := &CameraService{mgr: mgr, appCfg: appCfg, configDir: configDir, database: database}
 	return &App{
 		Camera:    cameraSvc,
 		Stream:    NewStreamService(mgr),
 		logCloser: logCloser,
+		database:  database,
 	}, nil
 }
 
@@ -205,6 +213,9 @@ func (a *App) StopWSServer() {
 // Close는 서버와 로거를 정지하고 리소스를 정리한다.
 func (a *App) Close() {
 	a.StopWSServer()
+	if a.database != nil {
+		_ = a.database.Close()
+	}
 	if a.logCloser != nil {
 		_ = a.logCloser.Close()
 	}
