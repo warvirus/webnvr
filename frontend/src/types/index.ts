@@ -73,6 +73,6 @@ export interface RTPPacketItem {
 export type {StreamStats, StreamState, StatSample, PacketIn} from './stream';
 
 // 모니터링 그리드 모드 (타일 수 기준)
-export type GridMode = 'auto' | 1 | 4 | 9 | 16;
+export type GridMode = 'auto' | 1 | 4 | 9 | 16 | 25;
 
 

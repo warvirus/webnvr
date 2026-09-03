@@ -7,11 +7,12 @@ import {selectOrderedCameras, useCameraStore} from '../../store/cameraStore';
 import {useStreamStore} from '../../store/streamStore';
 
 const GRID_OPTIONS: {value: GridMode; label: string}[] = [
-  {value: 'auto', label: '자동'},
-  {value: 1, label: '1×1'},
-  {value: 4, label: '2×2'},
-  {value: 9, label: '3×3'},
-  {value: 16, label: '4×4'},
+  {value: 'auto', label: 'A'},
+  {value: 1, label: '1'},
+  {value: 4, label: '4'},
+  {value: 9, label: '9'},
+  {value: 16, label: '16'},
+  {value: 25, label: '25'},
 ];
 
 // toggleFullscreen은 모니터링 화면의 전체화면을 전환한다 (doc 5.3).
