@@ -123,7 +123,9 @@ func (a *App) StartWSServer(assets http.FileSystem) error {
 	if bind == "" {
 		bind = "127.0.0.1" // 설정 누락 시 안전한 기본값
 	}
-	a.wsServer = ws.NewServer(a.Stream, fmt.Sprintf("%s:%d", bind, a.Camera.appCfg.Server.WSPort))
+	a.wsServer = ws.NewServer(a.Stream, fmt.Sprintf("%s:%d", bind, a.Camera.appCfg.Server.WSPort), func() int {
+		return a.Camera.AppConfig().Server.MaxClients
+	})
 
 	mux := http.NewServeMux()
 	mux.Handle("/ws", a.wsServer.Mux())

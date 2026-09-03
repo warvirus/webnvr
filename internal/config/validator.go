@@ -24,6 +24,9 @@ func Validate(cfg *AppConfig) error {
 	if strings.TrimSpace(cfg.Server.Bind) == "" {
 		return fmt.Errorf("server.bind는 비어 있을 수 없음 (127.0.0.1 또는 0.0.0.0)")
 	}
+	if cfg.Server.MaxClients < 0 {
+		return fmt.Errorf("server.max_clients는 0 이상이어야 함: %d", cfg.Server.MaxClients)
+	}
 
 	switch strings.ToLower(cfg.Stream.DefaultTransport) {
 	case "tcp", "udp":

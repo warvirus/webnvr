@@ -37,7 +37,8 @@ export interface ServerMsg {
     | 'camera_status'
     | 'stats'
     | 'pong'
-    | 'config_updated';
+    | 'config_updated'
+    | 'client_limit_exceeded';
   cameraId?: string;
   reason?: string;
   error?: string;

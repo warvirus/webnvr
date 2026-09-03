@@ -21,7 +21,7 @@ type PTZCommand struct {
 // ServerMsg는 서버가 클라이언트로 보내는 메시지다.
 // 목적별 필드가 하나의 구조체에 모여 있으며 omitempty로 필요한 필드만 직렬화된다.
 type ServerMsg struct {
-	Type     string `json:"type"` // stream_started|rtp_packet|stream_stopped|stream_error|camera_discovered|camera_status|stats|pong|config_updated
+	Type     string `json:"type"` // stream_started|rtp_packet|stream_stopped|stream_error|camera_discovered|camera_status|stats|pong|config_updated|client_limit_exceeded
 	CameraID string `json:"cameraId,omitempty"`
 	Reason   string `json:"reason,omitempty"`
 	Error    string `json:"error,omitempty"`
@@ -59,15 +59,16 @@ const (
 
 // 서버 메시지 타입 상수
 const (
-	MsgStreamStarted    = "stream_started"
-	MsgRTPPacket        = "rtp_packet"
-	MsgRTPBatch         = "rtp_batch" // 여러 RTP 패킷의 배치 전송 (고비트레이트 스트림용 확장)
-	MsgStreamStopped    = "stream_stopped"
-	MsgStreamError      = "stream_error"
-	MsgCameraDiscovered = "camera_discovered"
-	MsgCameraStatus     = "camera_status"
-	MsgStats            = "stats"
-	MsgPong             = "pong"
+	MsgStreamStarted       = "stream_started"
+	MsgRTPPacket           = "rtp_packet"
+	MsgRTPBatch            = "rtp_batch" // 여러 RTP 패킷의 배치 전송 (고비트레이트 스트림용 확장)
+	MsgStreamStopped       = "stream_stopped"
+	MsgStreamError         = "stream_error"
+	MsgCameraDiscovered    = "camera_discovered"
+	MsgCameraStatus        = "camera_status"
+	MsgStats               = "stats"
+	MsgPong                = "pong"
+	MsgClientLimitExceeded = "client_limit_exceeded"
 )
 
 // RTPPacketItem은 rtp_batch의 개별 패킷이다. JSON 크기 절감을 위해 축약 키를 사용한다.

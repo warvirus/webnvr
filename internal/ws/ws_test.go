@@ -146,7 +146,7 @@ func newTestServer(t *testing.T, ctrl Controller) *Server {
 	addr := l.Addr().String()
 	_ = l.Close()
 
-	srv := NewServer(ctrl, addr)
+	srv := NewServer(ctrl, addr, nil)
 	if err := srv.Start(); err != nil {
 		t.Fatalf("Start() err = %v", err)
 	}

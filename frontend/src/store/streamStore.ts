@@ -26,6 +26,8 @@ interface StreamStoreState {
   retries: Record<string, number>;
   connected: boolean;
   lastError: string | null;
+  rejected: boolean;
+  retryAt: number | null;
 
   startStream: (cameraId: string) => void;
   stopStream: (cameraId: string) => void;
@@ -146,6 +148,8 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
   retries: {},
   connected: false,
   lastError: null,
+  rejected: false,
+  retryAt: null,
 
   init: () => {
     console.log('🔌 streamStore.init() 시작 — WS 연결 초기화');
@@ -225,7 +229,10 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
     // 연결 상태 추적 + 재연결 시 세션 리셋
     const offStatus = wsService.onStatus(connected => {
       console.log('🔌 WebSocket 상태 변경:', connected ? '✅ 연결됨' : '❌ 끊김');
-      set({connected});
+      set(s => ({
+        connected,
+        ...(connected ? {rejected: false, retryAt: null} : {}),
+      }));
       if (!connected) {
         // 연결이 끊기면 모든 스트림이 유실된 것으로 간주한다.
         // desired는 유지 — WS 재연결 후 리컨실리어가 자동으로 다시 시작한다.
@@ -241,12 +248,19 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
       }
     });
 
+    // 동시 접속 제한 거부 상태 추적
+    const offRejected = wsService.onRejected(retryAt => {
+      console.log('⚠️ 동시 접속 제한 중 — 재시도 예정:', new Date(retryAt).toLocaleTimeString());
+      set({rejected: true, retryAt});
+    });
+
     wsService.connect();
     ensureReconciler(); // desired 스트림 자동 재연결 감시 시작
 
     return () => {
       offMsg();
       offStatus();
+      offRejected();
     };
   },
 

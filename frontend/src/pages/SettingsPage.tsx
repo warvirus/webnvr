@@ -94,6 +94,11 @@ export function SettingsPage() {
               onChange={e => patch('server', 'ws_port', Number(e.target.value) || 0)}/>
           </div>
           <div className="field">
+            <label>최대 동시 접속 수 (0 = 무제한)</label>
+            <input type="text" value={cfg.server.max_clients}
+              onChange={e => patch('server', 'max_clients', Number(e.target.value) || 0)}/>
+          </div>
+          <div className="field">
             <label>기본 전송 방식</label>
             <select value={cfg.stream.default_transport}
               onChange={e => patch('stream', 'default_transport', e.target.value)}>

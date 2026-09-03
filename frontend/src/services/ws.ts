@@ -4,15 +4,18 @@ import {ClientMsg, ServerMsg} from '../types';
 import {backendWS} from './backend';
 const HEARTBEAT_MS = 25_000;
 const MAX_BACKOFF_MS = 30_000;
+const REJECT_RETRY_MS = 60_000;
 
 type Handler = (msg: ServerMsg) => void;
 type StatusHandler = (connected: boolean) => void;
+type RejectHandler = (retryAt: number) => void;
 
 // WsService는 단일 WS 연결을 유지하며 재연결과 전송 큐를 처리한다.
 export class WsService {
   private ws: WebSocket | null = null;
   private handlers = new Set<Handler>();
   private statusHandlers = new Set<StatusHandler>();
+  private rejectHandlers = new Set<RejectHandler>();
   private queue: ClientMsg[] = [];
   private backoff = 1000;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -42,6 +45,16 @@ export class WsService {
     ws.onmessage = ev => {
       try {
         const msg = JSON.parse(ev.data as string) as ServerMsg;
+
+        // 동시 접속 제한 거부 처리
+        if (msg.type === 'client_limit_exceeded') {
+          console.log('⚠️ 동시 접속 제한 도달 — 60초 후 재시도');
+          this.backoff = REJECT_RETRY_MS;
+          const retryAt = Date.now() + REJECT_RETRY_MS;
+          this.rejectHandlers.forEach(h => h(retryAt));
+          return;
+        }
+
         this.handlers.forEach(h => h(msg));
       } catch {
         // 잘못된 JSON 무시
@@ -69,6 +82,12 @@ export class WsService {
   onStatus(handler: StatusHandler): () => void {
     this.statusHandlers.add(handler);
     return () => this.statusHandlers.delete(handler);
+  }
+
+  // onRejected는 동시 접속 제한 거부 핸들러를 등록한다.
+  onRejected(handler: RejectHandler): () => void {
+    this.rejectHandlers.add(handler);
+    return () => this.rejectHandlers.delete(handler);
   }
 
   // send는 메시지를 전송한다. 연결이 끊긴 경우 큐에 적재한다.
@@ -116,6 +135,7 @@ export class WsService {
     this.ws?.close();
     this.handlers.clear();
     this.statusHandlers.clear();
+    this.rejectHandlers.clear();
   }
 }
 

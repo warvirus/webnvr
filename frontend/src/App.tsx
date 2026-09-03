@@ -3,6 +3,7 @@ import React, {useEffect} from 'react';
 import {Sidebar} from './components/layout/Sidebar';
 import {Toolbar} from './components/layout/Toolbar';
 import {StatusBar} from './components/layout/StatusBar';
+import {ClientLimitOverlay} from './components/common/ClientLimitOverlay';
 import {CameraManagementPage} from './pages/CameraManagementPage';
 import {SettingsPage} from './pages/SettingsPage';
 import {MonitoringPage} from './pages/MonitoringPage';
@@ -27,6 +28,7 @@ export default function App() {
 
   return (
     <div className="shell">
+      <ClientLimitOverlay/>
       <Sidebar/>
       <Toolbar/>
       <main className="main">

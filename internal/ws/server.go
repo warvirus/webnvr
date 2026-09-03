@@ -24,8 +24,9 @@ const (
 
 // Server는 로컬 WebSocket 서버다. 인증이 없는 Phase에서는 로컬호스트에만 바인딩한다.
 type Server struct {
-	ctrl Controller
-	addr string
+	ctrl       Controller
+	addr       string
+	maxClients func() int // 최대 동시 접속 수 (nil 또는 0 반환 = 무제한)
 
 	mu    sync.Mutex
 	ln    net.Listener
@@ -34,8 +35,9 @@ type Server struct {
 }
 
 // NewServer는 컨트롤러와 바인딩 주소로 서버를 생성한다.
-func NewServer(ctrl Controller, addr string) *Server {
-	return &Server{ctrl: ctrl, addr: addr, conns: map[*connState]struct{}{}}
+// maxClients는 최대 동시 접속 수를 반환하는 함수 (nil이면 무제한)
+func NewServer(ctrl Controller, addr string, maxClients func() int) *Server {
+	return &Server{ctrl: ctrl, addr: addr, maxClients: maxClients, conns: map[*connState]struct{}{}}
 }
 
 // Mux는 업그레이드 엔드포인트(/ws)를 등록한 mux를 반환한다.
@@ -136,6 +138,22 @@ func (s *Server) mux() http.Handler {
 			slog.Warn("WS 업그레이드 실패", "err", err)
 			return
 		}
+
+		// 동시 접속 제한 체크
+		if s.maxClients != nil {
+			if max := s.maxClients(); max > 0 {
+				s.mu.Lock()
+				current := len(s.conns)
+				s.mu.Unlock()
+				if current >= max {
+					slog.Warn("📊 동시 접속 제한 도달", "current", current, "max", max)
+					_ = conn.WriteJSON(ServerMsg{Type: MsgClientLimitExceeded})
+					_ = conn.Close()
+					return
+				}
+			}
+		}
+
 		s.serveConn(conn)
 	})
 	return mux
