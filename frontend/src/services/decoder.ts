@@ -207,7 +207,7 @@ export class Session {
   // prepareDecoder는 외부(config 수신 시점)에서 디코더 준비를 트리거한다.
   prepareDecoder(): boolean {
     const ok = this.ensureDecoder();
-    console.log('🎬 디코더 준비', {camera: this.cameraId, success: ok, codec: this.config?.codec});
+    // console.log('🎬 디코더 준비', {camera: this.cameraId, success: ok, codec: this.config?.codec});
     return ok;
   }
 
@@ -255,7 +255,7 @@ export class Session {
       try {
         const dec = new VideoDecoder({
           output: (frame: VideoFrame) => {
-            console.log('🎬 프레임 렌더링', {camera: this.cameraId, resolution: `${frame.displayWidth}x${frame.displayHeight}`});
+            // console.log('🎬 프레임 렌더링', {camera: this.cameraId, resolution: `${frame.displayWidth}x${frame.displayHeight}`});
             this.ev.onFrame(this.cameraId, frame);
           },
           error: (e: DOMException) => {
@@ -268,7 +268,7 @@ export class Session {
         const cfg = buildConfig(format);
         if (hw) cfg.hardwareAcceleration = 'prefer-hardware';
         dec.configure(cfg);
-        console.log('✅ 디코더 설정 성공', {camera: this.cameraId, format: format === 0 ? 'Annex B' : 'AVCC', hw});
+        // console.log('✅ 디코더 설정 성공', {camera: this.cameraId, format: format === 0 ? 'Annex B' : 'AVCC', hw});
         return dec;
       } catch (e) {
         console.warn('⚠️ 디코더 설정 실패', {camera: this.cameraId, format: format === 0 ? 'Annex B' : 'AVCC', hw, error: String(e)});
@@ -305,7 +305,7 @@ export class Session {
   push(p: PacketIn) {
     this.packets++;
     this.bytes += p.payload.length;
-    if (this.packets === 1) console.log('📦 첫 패킷 도착', {camera: this.cameraId});
+    // if (this.packets === 1) console.log('📦 첫 패킷 도착', {camera: this.cameraId});
     if (this.lastSeq >= 0) {
       if (p.seq === this.lastSeq) return; // 중복
       if (!seqNewer(p.seq, this.lastSeq)) {
@@ -397,7 +397,7 @@ export class Session {
         this.drops++;
         return;
       }
-      console.log('🔑 첫 키프레임 수신', {camera: this.cameraId});
+      // console.log('🔑 첫 키프레임 수신', {camera: this.cameraId});
       this.sawKeyframe = true;
     }
 
@@ -453,7 +453,7 @@ export class Session {
     if (this.frames === 1) {
       // 첫 프레임 디코딩 시도 성공 → 성공 포맷을 기억해(재접속 시 우선 사용)
       // UI의 오류/대기 상태를 해제한다
-      console.log('✅ 첫 프레임 디코딩 시도', {camera: this.cameraId, format: this.formatIdx === 0 ? 'Annex B' : 'AVCC'});
+      // console.log('✅ 첫 프레임 디코딩 시도', {camera: this.cameraId, format: this.formatIdx === 0 ? 'Annex B' : 'AVCC'});
       lastGoodFormat = this.formatIdx;
       this.ev.onDecoded(this.cameraId);
     }

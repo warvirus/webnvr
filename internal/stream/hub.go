@@ -253,7 +253,7 @@ func (h *Hub) publish(cameraID string, ev Event) {
 				if e.packetCount > 0 {
 					dropRate = float64(e.dropCount) / float64(e.packetCount) * 100
 				}
-				slog.Info("📊 RTP 패킷 통계",
+				slog.Debug("📊 RTP 패킷 통계",
 					"camera", cameraID,
 					"pps", fmt.Sprintf("%.0f/sec", pps),
 					"dps", fmt.Sprintf("%.1f/sec", dps),
