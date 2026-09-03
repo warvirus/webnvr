@@ -160,6 +160,14 @@ input, select { font-family: inherit; }
 .btn-danger { color: var(--rec); }
 .btn-danger:hover { border-color: var(--rec); }
 
+.btn-active {
+  background: var(--amber);
+  border-color: var(--amber);
+  color: #16130a;
+  font-weight: 700;
+}
+.btn-active:hover { background: var(--amber-press); border-color: var(--amber-press); }
+
 /* ── 본문 ─────────────────────────────────────────────────── */
 .main { grid-area: main; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 18px; }
 
