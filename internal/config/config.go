@@ -52,13 +52,14 @@ type LoggingConfig struct {
 const CurrentVersion = 1
 
 // Default는 문서 §8 스키마에 정의된 기본 설정을 반환한다.
+// 이 프로그램은 외부 송출(스트리밍) 목적이므로 기본값은 0.0.0.0(모든 인터페이스)이다.
 func Default() *AppConfig {
 	return &AppConfig{
 		Version: CurrentVersion,
 		Server: ServerConfig{
 			WSPort:     8080,
 			HTTPPort:   8081,
-			Bind:       "127.0.0.1",
+			Bind:       "0.0.0.0",
 			MaxClients: 0,
 		},
 		Stream: StreamConfig{
