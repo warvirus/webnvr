@@ -28,6 +28,8 @@ interface StreamStoreState {
   lastError: string | null;
   rejected: boolean;
   retryAt: number | null;
+  // 연결이 끊긴 동안 다음 WS 재시도 예정 시각(epoch ms). 연결되면 null.
+  reconnectAt: number | null;
 
   startStream: (cameraId: string) => void;
   stopStream: (cameraId: string) => void;
@@ -150,6 +152,7 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
   lastError: null,
   rejected: false,
   retryAt: null,
+  reconnectAt: null,
 
   init: () => {
     console.log('🔌 streamStore.init() 시작 — WS 연결 초기화');
@@ -227,11 +230,11 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
     });
 
     // 연결 상태 추적 + 재연결 시 세션 리셋
-    const offStatus = wsService.onStatus(connected => {
+    const offStatus = wsService.onStatus((connected, reconnectAt) => {
       console.log('🔌 WebSocket 상태 변경:', connected ? '✅ 연결됨' : '❌ 끊김');
       set(s => ({
         connected,
-        ...(connected ? {rejected: false, retryAt: null} : {}),
+        ...(connected ? {rejected: false, retryAt: null, reconnectAt: null} : {reconnectAt: reconnectAt ?? s.reconnectAt}),
       }));
       if (!connected) {
         // 연결이 끊기면 모든 스트림이 유실된 것으로 간주한다.

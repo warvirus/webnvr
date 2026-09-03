@@ -7,7 +7,8 @@ const MAX_BACKOFF_MS = 30_000;
 const REJECT_RETRY_MS = 60_000;
 
 type Handler = (msg: ServerMsg) => void;
-type StatusHandler = (connected: boolean) => void;
+// 끊긴 경우 reconnectAt = 다음 재시도 예정 시각(epoch ms)
+type StatusHandler = (connected: boolean, reconnectAt?: number) => void;
 type RejectHandler = (retryAt: number) => void;
 
 // WsService는 단일 WS 연결을 유지하며 재연결과 전송 큐를 처리한다.
@@ -38,7 +39,7 @@ export class WsService {
       this.startHeartbeat();
       // 대기 중이던 요청을 먼저 보낸다
       const pending = this.queue.splice(0);
-      console.log('📤 대기 중인 메시지 전송:', pending.length);
+      //console.log('📤 대기 중인 메시지 전송:', pending.length);
       pending.forEach(m => this.send(m));
     };
 
@@ -113,9 +114,10 @@ export class WsService {
 
   private scheduleReconnect() {
     if (this.reconnectTimer) return;
-    this.statusHandlers.forEach(h => h(false));
     const delay = this.backoff;
     this.backoff = Math.min(this.backoff * 2, MAX_BACKOFF_MS);
+    const reconnectAt = Date.now() + delay;
+    this.statusHandlers.forEach(h => h(false, reconnectAt));
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();

@@ -10,7 +10,7 @@ import {useUIStore} from '../store/uiStore';
 
 // MonitoringPage는 활성화된 카메라의 실시간 스트림을 그리드로 표시한다.
 export function MonitoringPage() {
-  console.log('🎥 MonitoringPage 마운트됨');
+  // console.log('🎥 MonitoringPage 마운트됨');
   const cameras = useCameraStore(s => s.cameras);
   const fetchCameras = useCameraStore(s => s.fetchCameras);
   const states = useStreamStore(s => s.states);
@@ -21,14 +21,10 @@ export function MonitoringPage() {
   const lastError = useStreamStore(s => s.lastError);
   const startStream = useStreamStore(s => s.startStream);
   const stopStream = useStreamStore(s => s.stopStream);
-  const init = useStreamStore(s => s.init);
   const clearError = () => useStreamStore.setState({lastError: null});
   const pushToast = useUIStore(s => s.pushToast);
   const setPage = useUIStore(s => s.setPage);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-
-  // WS 연결 + 메시지 라우팅 초기화
-  useEffect(() => init(), [init]);
 
   // 카메라 목록 로드
   useEffect(() => {

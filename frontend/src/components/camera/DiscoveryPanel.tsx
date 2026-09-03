@@ -3,11 +3,13 @@ import React from 'react';
 import {IconPlus, IconSearch, IconRefresh} from '../common/Icons';
 import {useCameraStore} from '../../store/cameraStore';
 import {useUIStore} from '../../store/uiStore';
+import {useStreamStore} from '../../store/streamStore';
 
 // DiscoveryPanel은 로컬 네트워크의 ONVIF 카메라를 찾아 추가를 유도한다.
 export function DiscoveryPanel() {
   const {discovered, isDiscovering, discover} = useCameraStore();
   const {pushToast, openCameraModal} = useUIStore();
+  const connected = useStreamStore(s => s.connected);
 
   async function scan() {
     try {
@@ -29,7 +31,12 @@ export function DiscoveryPanel() {
     <section className="discovery" aria-label="네트워크 카메라 검색">
       <div className="discovery-head">
         <h3>네트워크 검색</h3>
-        <button className="btn" onClick={scan} disabled={isDiscovering}>
+        <button
+          className="btn"
+          onClick={scan}
+          disabled={isDiscovering || !connected}
+          title={connected ? undefined : '백엔드 서버에 연결되어 있지 않습니다'}
+        >
           {isDiscovering ? <IconRefresh size={14}/> : <IconSearch size={14}/>}
           {isDiscovering ? '검색 중…' : '네트워크 검색'}
         </button>

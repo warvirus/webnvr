@@ -50,6 +50,7 @@ export function Toolbar() {
   const streamingCount = useStreamStore(s =>
     Object.values(s.states).filter(st => st === 'streaming').length);
   const stats = useStreamStore(s => s.stats);
+  const connected = useStreamStore(s => s.connected);
 
   const titles: Record<string, {eyebrow: string; title: string}> = {
     monitoring: {eyebrow: 'Live Grid', title: '모니터링'},
@@ -77,7 +78,12 @@ export function Toolbar() {
             등록 <b>{String(cameras.length).padStart(2, '0')}</b> · 사용 <b>{String(enabled.length).padStart(2, '0')}</b>
           </span>
           <div className="header-actions">
-            <button className="btn btn-primary" onClick={() => openCameraModal({mode: 'add'})}>
+            <button
+              className="btn btn-primary"
+              onClick={() => openCameraModal({mode: 'add'})}
+              disabled={!connected}
+              title={connected ? undefined : '백엔드 서버에 연결되어 있지 않습니다'}
+            >
               <IconPlus size={14}/> 카메라 추가
             </button>
           </div>
