@@ -3,7 +3,7 @@ import React, {useEffect, useRef, useState} from 'react';
 import {CameraDTO} from '../../types/api';
 import {StreamState, StreamStats} from '../../types';
 import {VideoRenderer} from './VideoRenderer';
-import {IconCamera, IconPlay} from '../common/Icons';
+import {IconCamera} from '../common/Icons';
 import {useStreamStore} from '../../store/streamStore';
 import {Sparkline} from '../stats/Sparkline';
 
@@ -41,7 +41,6 @@ export function CameraTile({camera, channel, state, stats, retryCount = 0, selec
   const [glFailed, setGlFailed] = useState(false);
   const history = useStreamStore(s => s.history[camera.id]);
   const resolution = useStreamStore(s => s.resolution[camera.id]);
-  const startStream = useStreamStore(s => s.startStream); // 대기 상태 수동 시작 버튼용
 
   useEffect(() => {
     if (!canvasRef.current || !active) return;
@@ -96,9 +95,6 @@ export function CameraTile({camera, channel, state, stats, retryCount = 0, selec
           <div className="tile-idle">
             <IconCamera size={22}/>
             <span>스트림 대기 중</span>
-            <button className="btn" onClick={e => { e.stopPropagation(); startStream(camera.id); }}>
-              <IconPlay size={12}/> 시작
-            </button>
           </div>
         )}
         {active && state === 'starting' && (
