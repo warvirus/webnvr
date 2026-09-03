@@ -24,12 +24,26 @@ function toggleFullscreen() {
   }
 }
 
+// slotsFor와 colsFor는 CameraGrid와 동일한 로직
+function slotsFor(mode: GridMode, cameraCount: number): number {
+  if (mode === 'auto') return Math.max(cameraCount, 1);
+  return mode;
+}
+
+function colsFor(mode: GridMode, slots: number): number {
+  if (mode !== 'auto') return Math.round(Math.sqrt(mode));
+  const cols = Math.ceil(Math.sqrt(slots));
+  return Math.max(cols, 1);
+}
+
 export function Toolbar() {
   const currentPage = useUIStore(s => s.currentPage);
   const setPage = useUIStore(s => s.setPage);
   const openCameraModal = useUIStore(s => s.openCameraModal);
   const gridMode = useUIStore(s => s.gridMode);
   const setGridMode = useUIStore(s => s.setGridMode);
+  const gridPage = useUIStore(s => s.gridPage);
+  const setGridPage = useUIStore(s => s.setGridPage);
 
   const cameras = useCameraStore(s => s.cameras);
 
@@ -44,6 +58,11 @@ export function Toolbar() {
   };
   const t = titles[currentPage] ?? titles.management;
   const enabled = selectOrderedCameras(cameras).filter(c => c.enabled);
+
+  // 페이지네이션 계산 (CameraGrid와 동일)
+  const slots = slotsFor(gridMode, enabled.length);
+  const totalPages = Math.max(1, Math.ceil(enabled.length / slots));
+  const page = Math.min(gridPage, totalPages - 1);
 
   return (
     <header className="header">
@@ -103,21 +122,32 @@ export function Toolbar() {
                   {o.label}
                 </button>
               ))}
-            </div>
-            <div style={{display: 'flex', gap: '8px', alignItems: 'center'}}>
-              {(['monitoring', 'management', 'settings'] as const).map(p => (
-                <button
-                  key={p}
-                  className={`btn ${currentPage === p ? 'btn-active' : ''}`}
-                  title={p === 'monitoring' ? '모니터링 페이지' : p === 'management' ? '카메라 관리 페이지' : '설정 페이지'}
-                  onClick={() => setPage(p)}
-                >
-                  {p === 'monitoring' ? '모니터링' : p === 'management' ? '카메라' : '설정'}
-                </button>
-              ))}
+              {totalPages > 1 && (
+                <div style={{display: 'flex', gap: '4px', alignItems: 'center', marginLeft: '4px', paddingLeft: '8px', borderLeft: '1px solid rgba(0,0,0,0.1)'}}>
+                  <button
+                    className="btn btn-ghost"
+                    disabled={page === 0}
+                    title="이전 페이지"
+                    onClick={() => setGridPage(Math.max(0, page - 1))}
+                    style={{minWidth: '24px', padding: '4px 6px'}}
+                  >
+                    ‹
+                  </button>
+                  <span style={{fontSize: '12px', minWidth: '40px', textAlign: 'center'}}>{page + 1}/{totalPages}</span>
+                  <button
+                    className="btn btn-ghost"
+                    disabled={page === totalPages - 1}
+                    title="다음 페이지"
+                    onClick={() => setGridPage(Math.min(totalPages - 1, page + 1))}
+                    style={{minWidth: '24px', padding: '4px 6px'}}
+                  >
+                    ›
+                  </button>
+                </div>
+              )}
             </div>
             <button className="btn" title="전체화면 전환" onClick={toggleFullscreen}>
-              <IconFull size={14}/> 전체화면
+              <IconFull size={14}/>
             </button>
           </div>
         </>

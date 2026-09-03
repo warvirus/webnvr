@@ -33,7 +33,6 @@ function colsFor(mode: GridMode, slots: number): number {
 export function CameraGrid({cameras, states, stats, desired, retries, selectedId, onSelect}: Props) {
   const gridMode = useUIStore(s => s.gridMode);
   const gridPage = useUIStore(s => s.gridPage);
-  const setGridPage = useUIStore(s => s.setGridPage);
   const focusedCameraId = useUIStore(s => s.focusedCameraId);
   const setFocusedCamera = useUIStore(s => s.setFocusedCamera);
 
@@ -91,46 +90,23 @@ export function CameraGrid({cameras, states, stats, desired, retries, selectedId
   const visible = ordered.slice(offset, offset + slots);
 
   return (
-    <>
-      {totalPages > 1 && (
-        <div className="grid-pager">
-          <button
-            className="btn btn-ghost"
-            disabled={page === 0}
-            title="이전 페이지"
-            onClick={() => setGridPage(Math.max(0, page - 1))}
-          >
-            ‹
-          </button>
-          <span>{page + 1} / {totalPages}</span>
-          <button
-            className="btn btn-ghost"
-            disabled={page === totalPages - 1}
-            title="다음 페이지"
-            onClick={() => setGridPage(Math.min(totalPages - 1, page + 1))}
-          >
-            ›
-          </button>
-        </div>
-      )}
-      <div
-        className="camera-monitor-grid"
-        style={{gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`}}
-      >
-        {visible.map((cam, i) => (
-          <CameraTile
-            key={cam.id}
-            camera={cam}
-            channel={offset + i + 1}
-            state={states[cam.id] ?? 'idle'}
-            stats={stats[cam.id]}
-            selected={selectedId === cam.id}
-            active={i < slots}
-            onSelect={() => onSelect(cam.id)}
-            onDoubleClick={() => setFocusedCamera(cam.id)}
-          />
-        ))}
-      </div>
-    </>
+    <div
+      className="camera-monitor-grid"
+      style={{gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`}}
+    >
+      {visible.map((cam, i) => (
+        <CameraTile
+          key={cam.id}
+          camera={cam}
+          channel={offset + i + 1}
+          state={states[cam.id] ?? 'idle'}
+          stats={stats[cam.id]}
+          selected={selectedId === cam.id}
+          active={i < slots}
+          onSelect={() => onSelect(cam.id)}
+          onDoubleClick={() => setFocusedCamera(cam.id)}
+        />
+      ))}
+    </div>
   );
 }
