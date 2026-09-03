@@ -26,6 +26,7 @@ function toggleFullscreen() {
 
 export function Toolbar() {
   const currentPage = useUIStore(s => s.currentPage);
+  const setPage = useUIStore(s => s.setPage);
   const openCameraModal = useUIStore(s => s.openCameraModal);
   const gridMode = useUIStore(s => s.gridMode);
   const setGridMode = useUIStore(s => s.setGridMode);
@@ -90,15 +91,30 @@ export function Toolbar() {
           })()}
 
           <div className="header-actions">
-            <div className="field" style={{margin: 0, width: 110}}>
-              <select value={String(gridMode)} aria-label="레이아웃 선택" onChange={e => {
-                const v = e.target.value;
-                setGridMode(v === 'auto' ? 'auto' : Number(v) as GridMode);
-              }}>
-                {GRID_OPTIONS.map(o => (
-                  <option key={String(o.value)} value={String(o.value)}>{o.label}</option>
-                ))}
-              </select>
+            <div style={{display: 'flex', gap: '8px', alignItems: 'center'}}>
+              {GRID_OPTIONS.map(o => (
+                <button
+                  key={String(o.value)}
+                  className={`btn ${gridMode === o.value ? 'btn-active' : ''}`}
+                  title={`분할: ${o.label}`}
+                  onClick={() => setGridMode(o.value)}
+                  style={{minWidth: '32px'}}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            <div style={{display: 'flex', gap: '8px', alignItems: 'center'}}>
+              {(['monitoring', 'management', 'settings'] as const).map(p => (
+                <button
+                  key={p}
+                  className={`btn ${currentPage === p ? 'btn-active' : ''}`}
+                  title={p === 'monitoring' ? '모니터링 페이지' : p === 'management' ? '카메라 관리 페이지' : '설정 페이지'}
+                  onClick={() => setPage(p)}
+                >
+                  {p === 'monitoring' ? '모니터링' : p === 'management' ? '카메라' : '설정'}
+                </button>
+              ))}
             </div>
             <button className="btn" title="전체화면 전환" onClick={toggleFullscreen}>
               <IconFull size={14}/> 전체화면
