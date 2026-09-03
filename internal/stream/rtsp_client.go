@@ -40,7 +40,7 @@ func DialRTSP(ctx context.Context, rawURL, transport string, onInfo func(Info), 
 	var transportUDP gortsplib.Transport = gortsplib.TransportUDP
 	conf := gortsplib.Client{
 		Transport:   &transportTCP,
-		ReadTimeout: 10 * time.Second,
+		ReadTimeout: 30 * time.Second,  // 10초 → 30초 (네트워크 지연 대응)
 		// 카메라 서버(PythonCam 등)는 새 클라이언트 접속 시 인코더를 재시작해
 		// SSRC가 바뀐다. 기본 동작(세션 종료) 대신 새 SSRC를 수용한다.
 		AllowSSRCChange: true,

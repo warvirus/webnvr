@@ -10,7 +10,8 @@
 // │ DevServer (외부 브라우저)        │ <LAN IP>          │ 해당 IP          │
 // └────────────────────────────────┴──────────────────┴─────────────────┘
 
-const BACKEND_PORT = 8080;
+const HTTP_BACKEND_PORT = 8080;
+const HTTPS_BACKEND_PORT = 8443;
 
 // backendHost는 현재 컨텍스트에서 접근 가능한 백엔드 호스트명을 반환한다.
 export function backendHost(): string {
@@ -23,12 +24,22 @@ export function backendHost(): string {
   return h;
 }
 
+// backendPort는 현재 프로토콜에 맞는 백엔드 포트를 반환한다.
+function backendPort(): number {
+  return typeof location !== 'undefined' && location.protocol === 'https:' ? HTTPS_BACKEND_PORT : HTTP_BACKEND_PORT;
+}
+
 // backendBase는 REST API의 기본 URL을 반환한다.
+// HTTP/HTTPS 접속에 맞춰 자동으로 프로토콜과 포트 선택
 export function backendBase(): string {
-  return `http://${backendHost()}:${BACKEND_PORT}`;
+  const isHTTPS = typeof location !== 'undefined' && location.protocol === 'https:';
+  const protocol = isHTTPS ? 'https' : 'http';
+  return `${protocol}://${backendHost()}:${backendPort()}`;
 }
 
 // backendWS는 WS 엔드포인트 URL을 반환한다.
 export function backendWS(): string {
-  return `ws://${backendHost()}:${BACKEND_PORT}/ws`;
+  const isHTTPS = typeof location !== 'undefined' && location.protocol === 'https:';
+  const protocol = isHTTPS ? 'wss' : 'ws';
+  return `${protocol}://${backendHost()}:${backendPort()}/ws`;
 }

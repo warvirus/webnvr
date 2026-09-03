@@ -18,6 +18,8 @@ interface StreamStoreState {
   stats: Record<string, StreamStats>;
   // cameraId → 통계 히스토리 (스파크라인용)
   history: Record<string, StatSample[]>;
+  // cameraId → 해상도 {width, height}
+  resolution: Record<string, {width: number; height: number}>;
   // cameraId → 사용자가 의도한 스트림 상태 (true=재생 중이어야 함 — 자동 재연결 기준)
   desired: Record<string, boolean>;
   // cameraId → 자동 재연결 시도 횟수 (타일 표시용)
@@ -139,18 +141,25 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
   states: {},
   stats: {},
   history: {},
+  resolution: {},
   desired: {},
   retries: {},
   connected: false,
   lastError: null,
 
   init: () => {
+    console.log('🔌 streamStore.init() 시작 — WS 연결 초기화');
     // WS 서버 메시지 → 디코더/상태 라우팅
     const offMsg = wsService.on(msg => {
       const cameraId = msg.cameraId ?? '';
       switch (msg.type) {
         case 'stream_started': {
-          getHub().config(cameraId, {
+          console.log('📤 스트림 시작:', {cameraId, codec: msg.codec, resolution: `${msg.width}x${msg.height}`});
+          const hub = getHub();
+          // 기존 세션이 있으면 정리하고 새로 생성 (경합 조건 해결)
+          hub.detach(cameraId);
+          hub.attach(cameraId);
+          hub.config(cameraId, {
             codec: (msg.codec ?? 'h264') as 'h264' | 'h265',
             sps: msg.sps ?? '',
             pps: msg.pps ?? '',
@@ -158,7 +167,10 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
             clockRate: msg.clockRate ?? 90000,
           });
           // 화면 표시는 첫 프레임 디코딩('decoded') 시점으로 전환 — GOP 대기 중 "연결 중" 유지
-          set(s => ({states: {...s.states, [cameraId]: 'starting'}}));
+          set(s => ({
+            states: {...s.states, [cameraId]: 'starting'},
+            resolution: {...s.resolution, [cameraId]: {width: msg.width ?? 0, height: msg.height ?? 0}},
+          }));
           break;
         }
         case 'rtp_packet': {
@@ -200,6 +212,7 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
           break;
         }
         case 'stream_error': {
+          console.error('❌ stream_error 수신', {cameraId, error: msg.error});
           getHub().detach(cameraId);
           set(s => ({states: {...s.states, [cameraId]: 'error'}, lastError: msg.error ?? '알 수 없는 오류'}));
           break;
@@ -211,15 +224,18 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
 
     // 연결 상태 추적 + 재연결 시 세션 리셋
     const offStatus = wsService.onStatus(connected => {
+      console.log('🔌 WebSocket 상태 변경:', connected ? '✅ 연결됨' : '❌ 끊김');
       set({connected});
       if (!connected) {
         // 연결이 끊기면 모든 스트림이 유실된 것으로 간주한다.
         // desired는 유지 — WS 재연결 후 리컨실리어가 자동으로 다시 시작한다.
+        console.log('🧹 모든 스트림 정리, 자동 재연결 대기');
         const h = getHub();
         Object.keys(get().states).forEach(cameraId => h.detach(cameraId));
         set({states: {}, stats: {}, history: {}});
       } else {
         // 재연결 직후 리컨실리어가 즉시 desired 스트림을 복구하도록 백오프 해제
+        console.log('🔄 WebSocket 재연결 성공, 스트림 복구 시작');
         nextRetryAt = {};
         lastAttemptAt = {};
       }

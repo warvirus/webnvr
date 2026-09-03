@@ -1,4 +1,5 @@
 // webnvr 프론트엔드 진입점 — 폰트와 전역 스타일 적용
+console.log('🚀 main.tsx 시작됨');
 import React from 'react';
 import {createRoot} from 'react-dom/client';
 import '@fontsource/ibm-plex-sans-kr/400.css';

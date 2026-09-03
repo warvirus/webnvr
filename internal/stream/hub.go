@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 )
 
 // subscriberBuf는 구독자 채널 버퍼 크기다.
@@ -46,6 +47,10 @@ type activeStream struct {
 	subs   map[*subscriber]struct{}
 	info   Info
 	refs   int
+	// 진단 통계
+	packetCount uint64
+	dropCount   uint64
+	lastLogTime time.Time
 }
 
 // Hub는 카메라별 스트림을 관리하고 구독자에게 이벤트를 배포한다.
@@ -70,6 +75,7 @@ func (h *Hub) Start(cameraID string) error {
 	h.mu.Lock()
 	if _, ok := h.streams[cameraID]; ok {
 		h.mu.Unlock()
+		slog.Info("🔄 스트림 이미 실행 중", "camera", cameraID)
 		return nil
 	}
 	// 다른 Start가 끼어들지 않도록 자리를 먼저 확보한다.
@@ -77,14 +83,17 @@ func (h *Hub) Start(cameraID string) error {
 	h.streams[cameraID] = e
 	h.mu.Unlock()
 
+	slog.Info("▶️ 스트림 시작 시도", "camera", cameraID)
 	rawURL, transport, err := h.src.StreamURL(cameraID)
 	if err != nil {
 		h.mu.Lock()
 		delete(h.streams, cameraID)
 		h.mu.Unlock()
 		notifyFailed(h.src, cameraID)
+		slog.Error("❌ 스트림 URL 조회 실패", "camera", cameraID, "err", err)
 		return fmt.Errorf("스트림 URL 조회 실패: %w", err)
 	}
+	slog.Info("✅ 스트림 URL 조회 성공", "camera", cameraID, "url", rawURL, "transport", transport)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	e.cancel = cancel
@@ -93,6 +102,7 @@ func (h *Hub) Start(cameraID string) error {
 		dialErr := h.dial(ctx, rawURL, transport,
 			func(info Info) {
 				info.CameraID = cameraID
+				slog.Info("📹 스트림 시작", "camera", cameraID, "codec", info.Codec, "resolution", fmt.Sprintf("%dx%d", info.Width, info.Height))
 				h.setInfo(cameraID, info)
 				h.publish(cameraID, StartedEvent{Info: info})
 			},
@@ -102,7 +112,7 @@ func (h *Hub) Start(cameraID string) error {
 			},
 		)
 		if dialErr != nil && ctx.Err() == nil {
-			slog.Warn("RTSP 스트림 종료", "camera", cameraID, "err", dialErr)
+			slog.Error("❌ RTSP 연결 실패", "camera", cameraID, "err", dialErr)
 		}
 		h.close(cameraID, ctx.Err() == nil)
 	}()
@@ -225,11 +235,45 @@ func (h *Hub) publish(cameraID string, ev Event) {
 	if !ok {
 		return
 	}
+
+	// RTP 패킷인 경우만 통계 수집
+	if _, isPacket := ev.(PacketEvent); isPacket {
+		e.packetCount++
+
+		// 10초마다 통계 출력
+		now := time.Now()
+		if now.Sub(e.lastLogTime) > 10*time.Second {
+			if e.lastLogTime.IsZero() {
+				e.lastLogTime = now
+			} else {
+				elapsed := now.Sub(e.lastLogTime).Seconds()
+				pps := float64(e.packetCount) / elapsed
+				dps := float64(e.dropCount) / elapsed
+				dropRate := 0.0
+				if e.packetCount > 0 {
+					dropRate = float64(e.dropCount) / float64(e.packetCount) * 100
+				}
+				slog.Info("📊 RTP 패킷 통계",
+					"camera", cameraID,
+					"pps", fmt.Sprintf("%.0f/sec", pps),
+					"dps", fmt.Sprintf("%.1f/sec", dps),
+					"total_packets", e.packetCount,
+					"total_drops", e.dropCount,
+					"drop_rate", fmt.Sprintf("%.2f%%", dropRate),
+					"subs", len(e.subs))
+				e.packetCount = 0
+				e.dropCount = 0
+				e.lastLogTime = now
+			}
+		}
+	}
+
 	for s := range e.subs {
 		select {
 		case s.ch <- ev:
 		default:
 			s.drops++
+			e.dropCount++
 		}
 	}
 }

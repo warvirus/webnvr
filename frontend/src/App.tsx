@@ -9,6 +9,7 @@ import {MonitoringPage} from './pages/MonitoringPage';
 import {useUIStore} from './store/uiStore';
 
 export default function App() {
+  console.log('📱 App 컴포넌트 렌더링됨');
   const currentPage = useUIStore(s => s.currentPage);
   const toasts = useUIStore(s => s.toasts);
   const dismissToast = useUIStore(s => s.dismissToast);

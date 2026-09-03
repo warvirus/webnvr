@@ -56,14 +56,18 @@ func (s *connState) startStream(ctrl Controller, cameraID string) {
 	s.mu.Unlock()
 
 	if err := ctrl.Start(cameraID); err != nil {
+		slog.Error("❌ 스트림 시작 실패", "camera", cameraID, "err", err)
 		s.handleError(cameraID, err.Error())
 		return
 	}
 	ch, cancel, err := ctrl.Subscribe(cameraID)
 	if err != nil {
+		slog.Error("❌ 구독 실패", "camera", cameraID, "err", err)
 		s.handleError(cameraID, err.Error())
 		return
 	}
+	slog.Info("▶️ 스트림 구독 시작", "camera", cameraID)
+
 	s.mu.Lock()
 	if _, exists := s.cancels[cameraID]; exists {
 		s.mu.Unlock()
@@ -84,6 +88,7 @@ func (s *connState) pump(cameraID string, ch <-chan stream.Event, cancel func())
 		delete(s.cancels, cameraID)
 		s.mu.Unlock()
 		cancel()
+		slog.Info("⏹️ 스트림 종료", "camera", cameraID)
 	}()
 
 	codec := ""
@@ -106,6 +111,7 @@ func (s *connState) pump(cameraID string, ch <-chan stream.Event, cancel func())
 			flushBatch(batch)
 			batch = batch[:0]
 			codec = string(e.Info.Codec)
+			slog.Info("📤 스트림 시작 메시지 전송", "camera", cameraID, "codec", codec)
 			s.sendMsg(streamStartedMsg(e.Info))
 		case stream.PacketEvent:
 			batch = append(batch, RTPPacketItem{

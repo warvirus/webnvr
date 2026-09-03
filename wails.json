@@ -9,5 +9,10 @@
   "author": {
     "name": "Jason Lee",
     "email": "warvirus@hanmail.net"
+  },
+  "mac": {
+    "NSAppTransportSecurity": {
+      "NSAllowsArbitraryLoads": true
+    }
   }
 }

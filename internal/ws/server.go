@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -49,6 +51,7 @@ func (s *Server) Start() error {
 
 // StartWithHandler는 지정 핸들러로 서버를 시작한다. (비블로킹)
 // 호출자가 /ws 외의 추가 라우트(예: /api/*)를 mux에 등록해 사용할 수 있다.
+// HTTPS 인증서가 있으면 HTTP + HTTPS 동시 지원 (다른 포트: HTTP=:8080, HTTPS=:8443)
 func (s *Server) StartWithHandler(h http.Handler) error {
 	ln, err := net.Listen("tcp", s.addr)
 	if err != nil {
@@ -59,12 +62,36 @@ func (s *Server) StartWithHandler(h http.Handler) error {
 	s.http = &http.Server{Handler: h}
 	s.mu.Unlock()
 
+	certFile := os.Getenv("WEB_CERT")
+	keyFile := os.Getenv("WEB_KEY")
+
+	// HTTP 서버 시작
 	go func() {
+		slog.Info("HTTP/WS 서버 시작", "addr", ln.Addr().String())
 		if err := s.http.Serve(ln); err != nil && err != http.ErrServerClosed {
-			slog.Error("WS 서버 오류", "err", err)
+			slog.Error("HTTP 서버 오류", "err", err)
 		}
 	}()
-	slog.Info("HTTP/WS 서버 시작", "addr", ln.Addr().String())
+
+	// HTTPS 인증서가 있으면 HTTPS 서버도 별도 포트에서 시작
+	if certFile != "" && keyFile != "" {
+		httpsAddr := strings.Replace(s.addr, ":8080", ":8443", 1)
+		lnTLS, err := net.Listen("tcp", httpsAddr)
+		if err != nil {
+			slog.Warn("HTTPS 포트 바인딩 실패", "addr", httpsAddr, "err", err)
+			// HTTPS 실패는 경고만 하고 HTTP로 계속 진행
+			return nil
+		}
+
+		go func() {
+			httpsTLS := &http.Server{Handler: h}
+			slog.Info("HTTPS/WSS 서버 시작", "addr", lnTLS.Addr().String())
+			if err := httpsTLS.ServeTLS(lnTLS, certFile, keyFile); err != nil && err != http.ErrServerClosed {
+				slog.Error("HTTPS 서버 오류", "err", err)
+			}
+		}()
+	}
+
 	return nil
 }
 

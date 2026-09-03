@@ -206,7 +206,9 @@ export class Session {
 
   // prepareDecoder는 외부(config 수신 시점)에서 디코더 준비를 트리거한다.
   prepareDecoder(): boolean {
-    return this.ensureDecoder();
+    const ok = this.ensureDecoder();
+    console.log('🎬 디코더 준비', {camera: this.cameraId, success: ok, codec: this.config?.codec});
+    return ok;
   }
 
   // ensureDecoder는 현재 포맷 후보로 디코더를 동기적으로 준비한다.
@@ -218,11 +220,20 @@ export class Session {
       } catch { /* 무시 */ }
       this.decoder = null;
     }
-    if (!this.config) return false;
+    if (!this.config) {
+      console.warn('⚠️ ensureDecoder: config 없음', {camera: this.cameraId});
+      return false;
+    }
 
     const {sps, pps} = this.paramSets();
-    if (!sps || !pps || sps.length === 0 || pps.length === 0) return false;
-    if (this.config.codec === 'h264' && sps.length < 4) return false;
+    if (!sps || !pps || sps.length === 0 || pps.length === 0) {
+      console.warn('⚠️ ensureDecoder: SPS/PPS 없음', {camera: this.cameraId, hasSps: !!sps, hasPps: !!pps});
+      return false;
+    }
+    if (this.config.codec === 'h264' && sps.length < 4) {
+      console.warn('⚠️ ensureDecoder: SPS 길이 부족', {camera: this.cameraId, spsLen: sps.length});
+      return false;
+    }
 
     const codecStr = this.config.codec === 'h264'
       ? h264CodecString(sps)
@@ -244,9 +255,11 @@ export class Session {
       try {
         const dec = new VideoDecoder({
           output: (frame: VideoFrame) => {
+            console.log('🎬 프레임 렌더링', {camera: this.cameraId, resolution: `${frame.displayWidth}x${frame.displayHeight}`});
             this.ev.onFrame(this.cameraId, frame);
           },
           error: (e: DOMException) => {
+            console.error('❌ 비동기 디코더 오류', {camera: this.cameraId, error: e.message});
             this.lastError = `디코더 오류: ${e.message}`;
             // 비동기 오류는 포맷 후보 전환 트리거
             this.advanceFormat();
@@ -255,8 +268,10 @@ export class Session {
         const cfg = buildConfig(format);
         if (hw) cfg.hardwareAcceleration = 'prefer-hardware';
         dec.configure(cfg);
+        console.log('✅ 디코더 설정 성공', {camera: this.cameraId, format: format === 0 ? 'Annex B' : 'AVCC', hw});
         return dec;
-      } catch {
+      } catch (e) {
+        console.warn('⚠️ 디코더 설정 실패', {camera: this.cameraId, format: format === 0 ? 'Annex B' : 'AVCC', hw, error: String(e)});
         return null; // 동기 설정 실패
       }
     };
@@ -268,6 +283,7 @@ export class Session {
       this.decoder = dec;
       return true;
     }
+    console.error('❌ ensureDecoder: 모든 시도 실패', {camera: this.cameraId, formatIdx: this.formatIdx});
     return false;
   }
 
@@ -289,6 +305,7 @@ export class Session {
   push(p: PacketIn) {
     this.packets++;
     this.bytes += p.payload.length;
+    if (this.packets === 1) console.log('📦 첫 패킷 도착', {camera: this.cameraId});
     if (this.lastSeq >= 0) {
       if (p.seq === this.lastSeq) return; // 중복
       if (!seqNewer(p.seq, this.lastSeq)) {
@@ -322,6 +339,7 @@ export class Session {
 
     // 키프레임 이후 무출력 → 다른 청크 포맷으로 전환 (Safari avcC 필수 이슈 대응)
     if (this.sawKeyframe && now - this.firstKeyMs > STALL_MS) {
+      console.warn('⚠️ 키프레임 후 무출력 감지, 포맷 전환', {camera: this.cameraId, packets: this.packets, elapsed: Math.round(now - this.firstKeyMs)});
       if (this.advanceFormat()) {
         this.ev.onNotice(this.cameraId, `디코딩 출력이 없어 청크 포맷을 전환했습니다 (${this.formatIdx === FORMAT_ANNEXB ? 'Annex B' : 'AVCC'})`);
         return;
@@ -336,6 +354,7 @@ export class Session {
     // 키프레임 자체가 안 오는 경우 (모든 포맷과 무관 — 카메라 GOP 확인 필요)
     if (!this.sawKeyframe && now - this.firstPacketMs > 20_000) {
       if (!this.diagSent) {
+        console.error('❌ 키프레임 미수신 타임아웃', {camera: this.cameraId, packets: this.packets, elapsed: Math.round(now - this.firstPacketMs)});
         this.diagSent = true;
         this.ev.onError(this.cameraId, '20초간 키프레임을 수신하지 못했습니다 — 카메라의 GOP(키 프레임 간격) 설정을 확인하세요');
       }
@@ -378,6 +397,7 @@ export class Session {
         this.drops++;
         return;
       }
+      console.log('🔑 첫 키프레임 수신', {camera: this.cameraId});
       this.sawKeyframe = true;
     }
 
@@ -433,6 +453,7 @@ export class Session {
     if (this.frames === 1) {
       // 첫 프레임 디코딩 시도 성공 → 성공 포맷을 기억해(재접속 시 우선 사용)
       // UI의 오류/대기 상태를 해제한다
+      console.log('✅ 첫 프레임 디코딩 시도', {camera: this.cameraId, format: this.formatIdx === 0 ? 'Annex B' : 'AVCC'});
       lastGoodFormat = this.formatIdx;
       this.ev.onDecoded(this.cameraId);
     }
@@ -440,6 +461,7 @@ export class Session {
       this.decoder.decode(chunk);
     } catch (e) {
       // 디코더 상태 이상 → 포맷 전환 후 다음 키프레임에서 재시작
+      console.error('❌ 디코딩 실패', {camera: this.cameraId, error: String(e)});
       this.lastError = `디코딩 실패: ${String(e)}`;
       this.advanceFormat();
       this.drops++;

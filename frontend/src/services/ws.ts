@@ -22,16 +22,20 @@ export class WsService {
 
   connect() {
     if (this.disposed || this.ws) return;
-    const ws = new WebSocket(backendWS());
+    const url = backendWS();
+    console.log('🔗 WebSocket 연결 시도:', url);
+    const ws = new WebSocket(url);
     this.ws = ws;
 
     ws.onopen = () => {
+      console.log('✅ WebSocket 연결 성공!', {url, readyState: ws.readyState});
       this.backoff = 1000;
       this.connected = true;
       this.statusHandlers.forEach(h => h(true));
       this.startHeartbeat();
       // 대기 중이던 요청을 먼저 보낸다
       const pending = this.queue.splice(0);
+      console.log('📤 대기 중인 메시지 전송:', pending.length);
       pending.forEach(m => this.send(m));
     };
 
@@ -45,10 +49,12 @@ export class WsService {
     };
 
     ws.onclose = () => {
+      console.log('❌ WebSocket 연결 종료');
       this.cleanup();
       if (!this.disposed) this.scheduleReconnect();
     };
-    ws.onerror = () => {
+    ws.onerror = (event) => {
+      console.log('⚠️ WebSocket 에러:', event);
       // onclose에서 재연결 처리
     };
   }
