@@ -69,3 +69,7 @@ export const IconFull = svg(<>
 export const IconPlay = svg(<><path d="M7 4.5v15l13-7.5-13-7.5Z"/></>);
 
 export const IconStop = svg(<><rect x="6" y="6" width="12" height="12" rx="1.5"/></>);
+
+export const IconChevronLeft = svg(<><path d="M15 6l-6 6 6 6"/></>);
+
+export const IconChevronRight = svg(<><path d="M9 6l6 6-6 6"/></>);

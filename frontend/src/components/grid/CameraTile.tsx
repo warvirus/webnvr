@@ -16,6 +16,7 @@ interface Props {
   selected: boolean;
   active: boolean; // 레이아웃에 표시되는 타일인지
   onSelect: () => void;
+  onDoubleClick?: () => void; // 더블클릭 시 확대/축소
 }
 
 // subscribeFrames는 디코더(메인 스레드)의 프레임 이벤트 중 해당 카메라의 것만 구독한다.
@@ -34,11 +35,12 @@ function subscribeFrames(
   return () => window.removeEventListener('webnvr-frame', handler);
 }
 
-export function CameraTile({camera, channel, state, stats, retryCount = 0, selected, active, onSelect}: Props) {
+export function CameraTile({camera, channel, state, stats, retryCount = 0, selected, active, onSelect, onDoubleClick}: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<VideoRenderer | null>(null);
   const [glFailed, setGlFailed] = useState(false);
   const history = useStreamStore(s => s.history[camera.id]);
+  const resolution = useStreamStore(s => s.resolution[camera.id]);
   const startStream = useStreamStore(s => s.startStream); // 대기 상태 수동 시작 버튼용
 
   useEffect(() => {
@@ -64,6 +66,7 @@ export function CameraTile({camera, channel, state, stats, retryCount = 0, selec
     <div
       className={`tile ${selected ? 'selected' : ''} ${state === 'error' ? 'tile-error' : ''}`}
       onClick={onSelect}
+      onDoubleClick={onDoubleClick}
       role="button"
       tabIndex={0}
       onKeyDown={e => { if (e.key === 'Enter') onSelect(); }}
@@ -113,7 +116,7 @@ export function CameraTile({camera, channel, state, stats, retryCount = 0, selec
       </div>
 
       <div className="tile-foot">
-        <span className="mono">{host}</span>
+        <span className="mono">{host}{resolution ? ` · ${resolution.width}x${resolution.height}` : ''}</span>
         <span className="tile-badges">
           {camera.ptzSupported && <span className="meta-tag ptz">PTZ</span>}
           <span className="meta-tag">{camera.type.toUpperCase()}</span>

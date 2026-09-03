@@ -32,28 +32,105 @@ function colsFor(mode: GridMode, slots: number): number {
 // CameraGrid는 활성화된 카메라를 OSD 타일로 배치한다.
 export function CameraGrid({cameras, states, stats, desired, retries, selectedId, onSelect}: Props) {
   const gridMode = useUIStore(s => s.gridMode);
+  const gridPage = useUIStore(s => s.gridPage);
+  const setGridPage = useUIStore(s => s.setGridPage);
+  const focusedCameraId = useUIStore(s => s.focusedCameraId);
+  const setFocusedCamera = useUIStore(s => s.setFocusedCamera);
+
   const ordered = selectOrderedCameras(cameras).filter(c => c.enabled);
+
+  // 포커스 모드: 선택한 카메라 1개만 표시
+  if (focusedCameraId) {
+    const focusedIdx = ordered.findIndex(c => c.id === focusedCameraId);
+    if (focusedIdx === -1) {
+      // 포커스 대상을 찾지 못하면 포커스 해제
+      setFocusedCamera(null);
+      return <div className="camera-monitor-grid" />;
+    }
+
+    const focusedCam = ordered[focusedIdx];
+    const prevIdx = focusedIdx === 0 ? ordered.length - 1 : focusedIdx - 1;
+    const nextIdx = focusedIdx === ordered.length - 1 ? 0 : focusedIdx + 1;
+
+    return (
+      <>
+        {ordered.length > 1 && (
+          <div className="grid-pager">
+            <button className="btn btn-ghost" title="이전 카메라" onClick={() => setFocusedCamera(ordered[prevIdx].id)}>
+              ‹
+            </button>
+            <span>{focusedIdx + 1} / {ordered.length}</span>
+            <button className="btn btn-ghost" title="다음 카메라" onClick={() => setFocusedCamera(ordered[nextIdx].id)}>
+              ›
+            </button>
+          </div>
+        )}
+        <div className="camera-monitor-grid" style={{gridTemplateColumns: '1fr'}}>
+          <CameraTile
+            key={focusedCam.id}
+            camera={focusedCam}
+            channel={focusedIdx + 1}
+            state={states[focusedCam.id] ?? 'idle'}
+            stats={stats[focusedCam.id]}
+            selected={selectedId === focusedCam.id}
+            active={true}
+            onSelect={() => onSelect(focusedCam.id)}
+            onDoubleClick={() => setFocusedCamera(null)}
+          />
+        </div>
+      </>
+    );
+  }
+
+  // 일반 모드: 그리드 페이지네이션
   const slots = slotsFor(gridMode, ordered.length);
   const cols = colsFor(gridMode, slots);
-  const visible = ordered.slice(0, slots);
+  const totalPages = Math.max(1, Math.ceil(ordered.length / slots));
+  const page = Math.min(gridPage, totalPages - 1);
+  const offset = page * slots;
+  const visible = ordered.slice(offset, offset + slots);
 
   return (
-    <div
-      className="camera-monitor-grid"
-      style={{gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`}}
-    >
-      {visible.map((cam, i) => (
-        <CameraTile
-          key={cam.id}
-          camera={cam}
-          channel={i + 1}
-          state={states[cam.id] ?? 'idle'}
-          stats={stats[cam.id]}
-          selected={selectedId === cam.id}
-          active={i < slots}
-          onSelect={() => onSelect(cam.id)}
-        />
-      ))}
-    </div>
+    <>
+      {totalPages > 1 && (
+        <div className="grid-pager">
+          <button
+            className="btn btn-ghost"
+            disabled={page === 0}
+            title="이전 페이지"
+            onClick={() => setGridPage(Math.max(0, page - 1))}
+          >
+            ‹
+          </button>
+          <span>{page + 1} / {totalPages}</span>
+          <button
+            className="btn btn-ghost"
+            disabled={page === totalPages - 1}
+            title="다음 페이지"
+            onClick={() => setGridPage(Math.min(totalPages - 1, page + 1))}
+          >
+            ›
+          </button>
+        </div>
+      )}
+      <div
+        className="camera-monitor-grid"
+        style={{gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`}}
+      >
+        {visible.map((cam, i) => (
+          <CameraTile
+            key={cam.id}
+            camera={cam}
+            channel={offset + i + 1}
+            state={states[cam.id] ?? 'idle'}
+            stats={stats[cam.id]}
+            selected={selectedId === cam.id}
+            active={i < slots}
+            onSelect={() => onSelect(cam.id)}
+            onDoubleClick={() => setFocusedCamera(cam.id)}
+          />
+        ))}
+      </div>
+    </>
   );
 }

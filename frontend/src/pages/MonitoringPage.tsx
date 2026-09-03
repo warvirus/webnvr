@@ -3,7 +3,6 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {CameraGrid} from '../components/grid/CameraGrid';
 import {PTZControl} from '../components/grid/PTZControl';
-import {StatsPanel} from '../components/stats/StatsPanel';
 import {IconGrid} from '../components/common/Icons';
 import {useCameraStore} from '../store/cameraStore';
 import {useStreamStore} from '../store/streamStore';
@@ -11,6 +10,7 @@ import {useUIStore} from '../store/uiStore';
 
 // MonitoringPage는 활성화된 카메라의 실시간 스트림을 그리드로 표시한다.
 export function MonitoringPage() {
+  console.log('🎥 MonitoringPage 마운트됨');
   const cameras = useCameraStore(s => s.cameras);
   const fetchCameras = useCameraStore(s => s.fetchCameras);
   const states = useStreamStore(s => s.states);
@@ -91,8 +91,6 @@ export function MonitoringPage() {
         selectedId={selectedId}
         onSelect={id => setSelectedId(id === selectedId ? null : id)}
       />
-
-      <StatsPanel/>
 
       {showPtz && selectedCamera && (
         <section className="discovery" aria-label="PTZ 제어 패널">

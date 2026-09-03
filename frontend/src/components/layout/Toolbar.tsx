@@ -33,6 +33,7 @@ export function Toolbar() {
 
   const streamingCount = useStreamStore(s =>
     Object.values(s.states).filter(st => st === 'streaming').length);
+  const stats = useStreamStore(s => s.stats);
 
   const titles: Record<string, {eyebrow: string; title: string}> = {
     monitoring: {eyebrow: 'Live Grid', title: '모니터링'},
@@ -64,9 +65,29 @@ export function Toolbar() {
 
       {currentPage === 'monitoring' && cameras.length > 0 && (
         <>
-          <span className="header-count">
-            스트리밍 <b>{String(streamingCount).padStart(2, '0')}</b> / {String(enabled.length).padStart(2, '0')}
-          </span>
+          {(() => {
+            // StatsPanel과 동일한 로직으로 통계 계산
+            const rows = selectOrderedCameras(cameras)
+              .filter(c => stats[c.id])
+              .map(c => stats[c.id]);
+            const totalKbps = rows.reduce((sum, s) => sum + s.kbps, 0);
+            const totalDrops = rows.reduce((sum, s) => sum + s.drops, 0);
+            const totalFps = rows.reduce((sum, s) => sum + s.fps, 0);
+
+            return (
+              <span className="header-count">
+                스트리밍 <b>{String(streamingCount).padStart(2, '0')}</b> / {String(enabled.length).padStart(2, '0')}
+                {rows.length > 0 && (
+                  <span className="header-stats">
+                    {' · '}전체 <b>{totalKbps.toLocaleString()}</b> kbps
+                    {' · '}<b>{Math.round(totalFps)}</b> fps
+                    {totalDrops > 0 && <span className="stats-drops">{' · '}드롭 {totalDrops}</span>}
+                  </span>
+                )}
+              </span>
+            );
+          })()}
+
           <div className="header-actions">
             <div className="field" style={{margin: 0, width: 110}}>
               <select value={String(gridMode)} aria-label="레이아웃 선택" onChange={e => {

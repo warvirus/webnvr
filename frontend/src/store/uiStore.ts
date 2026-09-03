@@ -21,21 +21,27 @@ interface UIState {
   cameraModal: CameraModalState | null;
   toasts: Toast[];
   gridMode: GridMode;
+  gridPage: number; // 일반 모드에서 현재 페이지 (0부터 시작)
+  focusedCameraId: string | null; // 더블클릭 확대 대상
   setPage: (p: Page) => void;
   openCameraModal: (state: CameraModalState) => void;
   closeCameraModal: () => void;
   pushToast: (kind: Toast['kind'], text: string) => void;
   dismissToast: (id: number) => void;
   setGridMode: (m: GridMode) => void;
+  setGridPage: (n: number) => void;
+  setFocusedCamera: (id: string | null) => void;
 }
 
 let toastSeq = 1;
 
 export const useUIStore = create<UIState>((set, get) => ({
-  currentPage: 'management',
+  currentPage: 'monitoring',
   cameraModal: null,
   toasts: [],
   gridMode: 'auto',
+  gridPage: 0,
+  focusedCameraId: null,
   setPage: (p) => set({currentPage: p}),
   openCameraModal: (state) => set({cameraModal: state}),
   closeCameraModal: () => set({cameraModal: null}),
@@ -45,5 +51,7 @@ export const useUIStore = create<UIState>((set, get) => ({
     setTimeout(() => get().dismissToast(id), 4200);
   },
   dismissToast: (id) => set({toasts: get().toasts.filter(t => t.id !== id)}),
-  setGridMode: (m) => set({gridMode: m}),
+  setGridMode: (m) => set({gridMode: m, gridPage: 0}), // 모드 변경 시 페이지 리셋
+  setGridPage: (n) => set({gridPage: n}),
+  setFocusedCamera: (id) => set({focusedCameraId: id}),
 }));
