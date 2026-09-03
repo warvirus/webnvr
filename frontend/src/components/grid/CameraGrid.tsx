@@ -33,55 +33,11 @@ function colsFor(mode: GridMode, slots: number): number {
 export function CameraGrid({cameras, states, stats, desired, retries, selectedId, onSelect}: Props) {
   const gridMode = useUIStore(s => s.gridMode);
   const gridPage = useUIStore(s => s.gridPage);
-  const focusedCameraId = useUIStore(s => s.focusedCameraId);
-  const setFocusedCamera = useUIStore(s => s.setFocusedCamera);
+  const zoomToggle = useUIStore(s => s.zoomToggle);
 
   const ordered = selectOrderedCameras(cameras).filter(c => c.enabled);
 
-  // 포커스 모드: 선택한 카메라 1개만 표시
-  if (focusedCameraId) {
-    const focusedIdx = ordered.findIndex(c => c.id === focusedCameraId);
-    if (focusedIdx === -1) {
-      // 포커스 대상을 찾지 못하면 포커스 해제
-      setFocusedCamera(null);
-      return <div className="camera-monitor-grid" />;
-    }
-
-    const focusedCam = ordered[focusedIdx];
-    const prevIdx = focusedIdx === 0 ? ordered.length - 1 : focusedIdx - 1;
-    const nextIdx = focusedIdx === ordered.length - 1 ? 0 : focusedIdx + 1;
-
-    return (
-      <>
-        {ordered.length > 1 && (
-          <div className="grid-pager">
-            <button className="btn btn-ghost" title="이전 카메라" onClick={() => setFocusedCamera(ordered[prevIdx].id)}>
-              ‹
-            </button>
-            <span>{focusedIdx + 1} / {ordered.length}</span>
-            <button className="btn btn-ghost" title="다음 카메라" onClick={() => setFocusedCamera(ordered[nextIdx].id)}>
-              ›
-            </button>
-          </div>
-        )}
-        <div className="camera-monitor-grid" style={{gridTemplateColumns: '1fr'}}>
-          <CameraTile
-            key={focusedCam.id}
-            camera={focusedCam}
-            channel={focusedIdx + 1}
-            state={states[focusedCam.id] ?? 'idle'}
-            stats={stats[focusedCam.id]}
-            selected={selectedId === focusedCam.id}
-            active={true}
-            onSelect={() => onSelect(focusedCam.id)}
-            onDoubleClick={() => setFocusedCamera(null)}
-          />
-        </div>
-      </>
-    );
-  }
-
-  // 일반 모드: 그리드 페이지네이션
+  // 그리드 페이지네이션 (더블클릭 확대는 gridMode=1 + gridPage로 처리 — 별도 포커스 상태 없음)
   const slots = slotsFor(gridMode, ordered.length);
   const cols = colsFor(gridMode, slots);
   const totalPages = Math.max(1, Math.ceil(ordered.length / slots));
@@ -104,7 +60,7 @@ export function CameraGrid({cameras, states, stats, desired, retries, selectedId
           selected={selectedId === cam.id}
           active={i < slots}
           onSelect={() => onSelect(cam.id)}
-          onDoubleClick={() => setFocusedCamera(cam.id)}
+          onDoubleClick={() => zoomToggle(offset + i, ordered.length)}
         />
       ))}
     </div>

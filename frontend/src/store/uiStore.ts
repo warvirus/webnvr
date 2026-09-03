@@ -21,8 +21,8 @@ interface UIState {
   cameraModal: CameraModalState | null;
   toasts: Toast[];
   gridMode: GridMode;
-  gridPage: number; // 일반 모드에서 현재 페이지 (0부터 시작)
-  focusedCameraId: string | null; // 더블클릭 확대 대상
+  gridPage: number; // 현재 페이지 (0부터 시작)
+  zoomReturnMode: GridMode | null; // 더블클릭 확대 시 복귀할 분할 모드 (null이면 확대 아님)
   setPage: (p: Page) => void;
   openCameraModal: (state: CameraModalState) => void;
   closeCameraModal: () => void;
@@ -30,7 +30,7 @@ interface UIState {
   dismissToast: (id: number) => void;
   setGridMode: (m: GridMode) => void;
   setGridPage: (n: number) => void;
-  setFocusedCamera: (id: string | null) => void;
+  zoomToggle: (cameraIndex: number, orderedLen: number) => void;
 }
 
 let toastSeq = 1;
@@ -41,7 +41,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   toasts: [],
   gridMode: 'auto',
   gridPage: 0,
-  focusedCameraId: null,
+  zoomReturnMode: null,
   setPage: (p) => set({currentPage: p}),
   openCameraModal: (state) => set({cameraModal: state}),
   closeCameraModal: () => set({cameraModal: null}),
@@ -51,7 +51,17 @@ export const useUIStore = create<UIState>((set, get) => ({
     setTimeout(() => get().dismissToast(id), 4200);
   },
   dismissToast: (id) => set({toasts: get().toasts.filter(t => t.id !== id)}),
-  setGridMode: (m) => set({gridMode: m, gridPage: 0}), // 모드 변경 시 페이지 리셋
+  setGridMode: (m) => set({gridMode: m, gridPage: 0, zoomReturnMode: null}), // 분할 버튼 선택 시 페이지 리셋 + 확대 해제
   setGridPage: (n) => set({gridPage: n}),
-  setFocusedCamera: (id) => set({focusedCameraId: id}),
+  // 타일 더블클릭: 확대 아니면 1분할로(해당 카메라 페이지) 전환, 확대 상태면 원래 분할 모드로 복귀
+  zoomToggle: (cameraIndex, orderedLen) => {
+    const {zoomReturnMode, gridMode, gridPage} = get();
+    if (zoomReturnMode === null) {
+      set({zoomReturnMode: gridMode, gridMode: 1, gridPage: cameraIndex});
+    } else {
+      const prev = zoomReturnMode;
+      const prevSlots = prev === 'auto' ? Math.max(orderedLen, 1) : prev;
+      set({zoomReturnMode: null, gridMode: prev, gridPage: Math.floor(gridPage / prevSlots)});
+    }
+  },
 }));
