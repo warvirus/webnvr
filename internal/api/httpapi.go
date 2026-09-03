@@ -3,10 +3,12 @@
 package api
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -58,6 +60,15 @@ type statusRecorder struct {
 func (sr *statusRecorder) WriteHeader(code int) {
 	sr.statusCode = code
 	sr.ResponseWriter.WriteHeader(code)
+}
+
+// Hijack는 WebSocket 업그레이드를 지원하기 위해 http.Hijacker를 구현한다.
+func (sr *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := sr.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("ResponseWriter does not support Hijacker")
+	}
+	return h.Hijack()
 }
 
 // AccessLog는 HTTP 요청/응답을 로깅하는 미들웨어다.
