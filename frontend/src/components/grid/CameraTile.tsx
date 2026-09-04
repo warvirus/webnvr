@@ -76,12 +76,12 @@ export function CameraTile({camera, channel, state, stats, retryCount = 0, selec
       <div className="tile-head">
         <span className="plate">CH {String(channel).padStart(2, '0')}</span>
         <span className="tile-name">{camera.name}</span>
-        {history && history.length > 1 && (
-          <span className="tile-spark">
-            <Sparkline samples={history} metric="fps" width={56} height={14}/>
-          </span>
-        )}
         <span className="osd-status">
+          {history && history.length > 1 && (
+            <span className="tile-spark">
+              <Sparkline samples={history} metric="fps" width={56} height={14}/>
+            </span>
+          )}
           {state === 'streaming' && stats ? (
             <span className="tile-stats">{stats.fps} fps · {stats.kbps} kbps{stats.drops > 0 ? ` · 드롭 ${stats.drops}` : ''}</span>
           ) : state === 'starting' ? '연결 중…' : state === 'error' ? '오류' : '대기'}
