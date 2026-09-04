@@ -18,6 +18,8 @@ require (
 
 require (
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect
+	github.com/asticode/go-astikit v0.30.0 // indirect
+	github.com/asticode/go-astits v1.13.0 // indirect
 	github.com/beevik/etree v1.1.0 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
