@@ -585,6 +585,51 @@ WebGL2 단일 텍스처 RGBA 패스스루(YUV→RGB는 `texImage2D(VideoFrame)`�
 
 ---
 
+## 6bis. 녹화 (Phase R.1 — remux 상시 녹화)
+
+설계 전문 = `plans/wails-dev-velvet-moonbeam.md`. R.1은 H.264/H.265 리먹스 상시 녹화 + 단일 스토리지 + janitor. `config.recording.enabled=false`(기본)면 아무 것도 생성되지 않고 기존 동작 완전 불변.
+
+### 6bis.1 데이터 흐름
+
+```
+DialRTSP ──onNALU 탭(nil이면 미동작)──▶ Hub.taps[cameraID] ──▶ recording.Recorder
+   (완성된 AU + 단조 90kHz pts[tsUnwrap] + IDR 여부)          │ IDR 경계 세그먼트 회전
+                                                              ▼
+                          tsSink(mediacommon mpegts.Writer) → <storage>/<cam>/<YYYY-MM-DD>/<HH-MM-SS>.ts
+                                                              │ 닫을 때 INSERT INTO segments
+                                                              ▼
+recording.Manager: record_mode=continuous 카메라마다 Hub 영구 구독(24/7)      SQLite segments
+  + supervise 고루틴(구독 채널 닫힘 → 지수 백오프 재구독, 일 단위 안정성)          ▲
+  StartedEvent→OnInfo(코덱/파라미터셋)  StoppedEvent→OnGap(불연속 마킹)          │
+                                                                        Janitor(60s):
+                                          retention_days / max_usage_gb / storages[].min_free_percent
+                                          → ORDER BY start_ts 삭제, keep_min_hours·기록 중 최신 세그먼트 보호
+```
+
+### 6bis.2 구성요소 (`internal/recording/`)
+
+| 파일 | 역할 |
+|------|------|
+| `codecpolicy.go` | `Decide(codec)` → Remux(h264/h265) \| Reject. 트랜스코드는 후속 H |
+| `segment.go` | `segmentSink` 인터페이스 + `tsSink`(mediacommon `mpegts.Writer`, `h264/h265.DTSExtractor`, IDR 앞 SPS/PPS/VPS 삽입). `newSink` 팩토리 var는 테스트 교체용 |
+| `recorder.go` | 카메라별 — pre-IDR 드롭, 첫 IDR에 세그먼트 open, `segment_seconds` 경과 또는 `segment_max_mb` 초과 시 다음 IDR에서 회전, `OnGap` 불연속, `Close` flush. 닫을 때 `store.Insert` |
+| `store.go` | `segments` DAO — Insert/Range(overlap)/Oldest/OlderThan/SumBytes/Delete/Get. 모든 조회 `(camera_id, start_ts)` 인덱스 |
+| `manager.go` | `config.recording.enabled` 시 `record_mode` 카메라의 Recorder 생성·Hub 영구 ref·NALU 탭. `supervise`가 24/7 유지(지수 백오프 최대 30s) |
+| `janitor.go` | 60초 주기 정리. `over(withReclaim)` = 할당량/디스크여유 판정, `tooRecent`(keep_min_hours), 기록 중 최신 세그먼트 보호 |
+| `freespace_unix.go` / `freespace_windows.go` | build-tag별 디스크 여유(%). `freePercentFn` var는 테스트 교체용 |
+
+### 6bis.3 스키마 · 설정
+
+- db 마이그레이션 #2 — `segments(camera_id, kind, start_ts[벽시계 ms], start_pts[90kHz], dur_ms, storage_idx, rel_path, bytes, flags[bit0=불연속], codec)` + `idx_segments_cam_ts`, `events` 테이블(R.4용).
+- db 마이그레이션 #3 (`camera.RecordColumnsSQL`) — `cameras.record_mode`(off\|continuous\|event\|both, 기본 off), `pre_roll_seconds`(10), `post_roll_seconds`(15). `record_mode` 변경은 앱 재시작 시 반영(동적은 R.5).
+- `config.recording` — `enabled`, `max_usage_gb`(0=무제한), `reclaim_percent`(10), `retention_days`(0=무제한), `keep_min_hours`(1), `storages[{path,min_free_percent}]`, `segment_seconds`(300), `segment_max_mb`(512), `transcode`(후속 H). validator는 `enabled=false`면 관대, `enabled`면 storages·segment 값 강제.
+
+### 6bis.4 R.1 범위 밖 (후속)
+
+R.2 다중 스토리지 페일오버 · R.3 재생(`GET /api/recordings/*` + PlaybackPage + hls.js) · R.4 이벤트 모드(pre/post-roll, `events` 테이블) · R.5 설정/폼 UI. `/api/recordings/*` 무인증 노출은 Phase 6.1 JWT까지 루프백 유지로 대응.
+
+---
+
 ## 7. 설계 결정 · 안정화 이력
 
 ### 7.1 설계 결정 (context-notes D1~D19)
