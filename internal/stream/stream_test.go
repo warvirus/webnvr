@@ -26,8 +26,9 @@ func (s testCameraSource) StreamURL(cameraID string) (string, string, error) {
 }
 
 // fakeDialer는 실제 네트워크 없이 Info와 N개의 패킷을 발생시킨다.
+// onNALU 탭이 있으면 패킷마다 액세스 유닛(짝수 i는 IDR)도 발생시킨다.
 func fakeDialer(packets int) Dialer {
-	return func(ctx context.Context, rawURL, transport string, onInfo func(Info), onPacket func(Packet)) error {
+	return func(ctx context.Context, rawURL, transport string, onInfo func(Info), onPacket func(Packet), onNALU func(codec Codec, nalus [][]byte, pts int64, key bool)) error {
 		onInfo(Info{Codec: CodecH264, SPS: []byte{0x67}, PPS: []byte{0x68}, ClockRate: 90000})
 		for i := 0; i < packets; i++ {
 			select {
@@ -36,6 +37,14 @@ func fakeDialer(packets int) Dialer {
 			default:
 			}
 			onPacket(Packet{Codec: CodecH264, Sequence: uint16(i), Timestamp: uint32(i), Payload: []byte{1, 2, 3}})
+			if onNALU != nil {
+				key := i%30 == 0
+				nalu := []byte{0x61} // non-IDR slice
+				if key {
+					nalu = []byte{0x65} // IDR slice
+				}
+				onNALU(CodecH264, [][]byte{nalu}, int64(i)*3000, key)
+			}
 			time.Sleep(1 * time.Millisecond)
 		}
 		<-ctx.Done()
@@ -325,6 +334,7 @@ func TestDialRTSPIntegration(t *testing.T) {
 			defer mu.Unlock()
 			pktCount++
 		},
+		nil,
 	)
 	mu.Lock()
 	defer mu.Unlock()
@@ -404,6 +414,7 @@ func TestDialRTSPSSRCChange(t *testing.T) {
 			defer mu.Unlock()
 			pktCount++
 		},
+		nil,
 	)
 	mu.Lock()
 	defer mu.Unlock()
@@ -513,5 +524,60 @@ func TestHubReload(t *testing.T) {
 	defer src.mu.Unlock()
 	if len(src.failed) == 0 || src.failed[0] != "cam-1" {
 		t.Errorf("OnStreamFailed 미호출: %v", src.failed)
+	}
+}
+
+// TestHubNALUTap는 SetNALUTap으로 등록한 콜백이 dial에서 액세스 유닛을 받는지 확인한다.
+func TestHubNALUTap(t *testing.T) {
+	hub := NewHub(testCameraSource{urls: map[string]string{"cam-1": "rtsp://127.0.0.1:1/s"}}, fakeDialer(100))
+
+	var mu sync.Mutex
+	var aus, keys int
+	hub.SetNALUTap("cam-1", func(codec Codec, nalus [][]byte, pts int64, key bool) {
+		mu.Lock()
+		aus++
+		if key {
+			keys++
+		}
+		mu.Unlock()
+	})
+
+	if err := hub.Start("cam-1"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	ch, cancel, err := hub.Subscribe("cam-1")
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	// 채널을 비워 세션 유지
+	go func() {
+		for range ch {
+		}
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := aus
+		mu.Unlock()
+		if n >= 30 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if aus < 30 {
+		t.Fatalf("탭이 받은 AU = %d, want >= 30", aus)
+	}
+	if keys < 1 {
+		t.Errorf("IDR AU를 하나도 못 받음 (keys=%d)", keys)
+	}
+
+	// 탭 해제 후 새 세션에는 전달 안 됨
+	hub.SetNALUTap("cam-1", nil)
+	if _, ok := hub.taps["cam-1"]; ok {
+		t.Error("SetNALUTap(nil) 후에도 탭이 남음")
 	}
 }

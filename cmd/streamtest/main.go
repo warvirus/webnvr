@@ -63,6 +63,7 @@ func main() {
 				packets++
 				bytes += int64(len(pkt.Payload))
 			},
+			nil, // onNALU (녹화 탭 — 진단 도구는 미사용)
 		)
 	}()
 

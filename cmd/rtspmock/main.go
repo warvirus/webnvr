@@ -72,6 +72,7 @@ func (h *handler) OnPlay(*gortsplib.ServerHandlerOnPlayCtx) (*base.Response, err
 				// 실제 카메라 패턴: IDR 프레임 앞에 STAP-A(SPS+PPS)를 먼저 인코딩/전송한다.
 				// (순서를 바꾸면 시퀀스가 역행해 수신 측에서 대규모 유실로 오판된다)
 				if stap, err := enc.Encode([][]byte{sampleSPS, samplePPS}); err == nil && len(stap) > 0 {
+					stap[0].Timestamp = uint32(ts)
 					_ = h.stream.WritePacketRTP(h.medi, stap[0])
 				}
 			}
@@ -80,6 +81,7 @@ func (h *handler) OnPlay(*gortsplib.ServerHandlerOnPlayCtx) (*base.Response, err
 				continue
 			}
 			for _, p := range pkts {
+				p.Timestamp = uint32(ts) // 프레임 단위 RTP 타임스탬프 (30fps → 3000/90kHz)
 				if err := h.stream.WritePacketRTP(h.medi, p); err != nil {
 					return
 				}

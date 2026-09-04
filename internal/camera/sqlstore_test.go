@@ -21,6 +21,9 @@ func newSQLTestStore(t *testing.T) *SQLCameraStore {
 	if _, err := d.Exec(SchemaSQL); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
+	if _, err := d.Exec(RecordColumnsSQL); err != nil {
+		t.Fatalf("record columns: %v", err)
+	}
 	t.Cleanup(func() { d.Close() })
 	return NewSQLCameraStore(d)
 }

@@ -53,6 +53,9 @@ type activeStream struct {
 	lastLogTime time.Time
 }
 
+// NALUTap은 완성된 액세스 유닛 하나를 받는 녹화용 콜백이다.
+type NALUTap func(codec Codec, nalus [][]byte, pts int64, key bool)
+
 // Hub는 카메라별 스트림을 관리하고 구독자에게 이벤트를 배포한다.
 type Hub struct {
 	src  CameraSource
@@ -60,6 +63,7 @@ type Hub struct {
 
 	mu      sync.Mutex
 	streams map[string]*activeStream
+	taps    map[string]NALUTap // cameraID → 녹화 탭 (재연결 사이에도 유지)
 }
 
 // NewHub는 카메라 소스와 연결 함수로 허브를 생성한다.
@@ -67,7 +71,18 @@ func NewHub(src CameraSource, dial Dialer) *Hub {
 	if dial == nil {
 		dial = DialRTSP
 	}
-	return &Hub{src: src, dial: dial, streams: map[string]*activeStream{}}
+	return &Hub{src: src, dial: dial, streams: map[string]*activeStream{}, taps: map[string]NALUTap{}}
+}
+
+// SetNALUTap은 카메라의 녹화 탭을 등록/해제한다(nil이면 해제). 재연결에도 유지된다.
+func (h *Hub) SetNALUTap(cameraID string, tap NALUTap) {
+	h.mu.Lock()
+	if tap == nil {
+		delete(h.taps, cameraID)
+	} else {
+		h.taps[cameraID] = tap
+	}
+	h.mu.Unlock()
 }
 
 // Start는 카메라 스트림을 시작한다. 이미 실행 중이면 아무 작업도 하지 않는다.
@@ -99,6 +114,19 @@ func (h *Hub) Start(cameraID string) error {
 	e.cancel = cancel
 
 	go func() {
+		var naluTap func(Codec, [][]byte, int64, bool)
+		h.mu.Lock()
+		if tap := h.taps[cameraID]; tap != nil {
+			naluTap = func(c Codec, nalus [][]byte, pts int64, key bool) {
+				h.mu.Lock()
+				t := h.taps[cameraID]
+				h.mu.Unlock()
+				if t != nil {
+					t(c, nalus, pts, key)
+				}
+			}
+		}
+		h.mu.Unlock()
 		dialErr := h.dial(ctx, rawURL, transport,
 			func(info Info) {
 				info.CameraID = cameraID
@@ -110,6 +138,7 @@ func (h *Hub) Start(cameraID string) error {
 				pkt.CameraID = cameraID
 				h.publish(cameraID, PacketEvent{Packet: pkt})
 			},
+			naluTap,
 		)
 		if dialErr != nil && ctx.Err() == nil {
 			slog.Error("❌ RTSP 연결 실패", "camera", cameraID, "err", dialErr)

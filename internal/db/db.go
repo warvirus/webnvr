@@ -51,6 +51,8 @@ var migrations = []string{
 		note       TEXT NOT NULL DEFAULT ''
 	);
 	CREATE INDEX idx_events_cam_ts ON events(camera_id, ts);`,
+	// #3 — Phase R 카메라별 녹화 모드. off면 녹화기가 생성되지 않는다.
+	camera.RecordColumnsSQL,
 }
 
 // DB는 열린 SQLite 연결과 설정 디렉토리를 감싼다.

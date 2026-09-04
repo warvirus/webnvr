@@ -32,6 +32,9 @@ type CameraDTO struct {
 	GroupID      string              `json:"groupId"`
 	LayoutOrder  int                 `json:"layoutOrder"`
 	Enabled      bool                `json:"enabled"`
+	RecordMode   string              `json:"recordMode"`
+	PreRoll      int                 `json:"preRollSeconds"`
+	PostRoll     int                 `json:"postRollSeconds"`
 	AddedAt      string              `json:"addedAt"`
 	UpdatedAt    string              `json:"updatedAt"`
 }
@@ -48,6 +51,9 @@ type CreateCameraRequest struct {
 	StreamConfig *camera.StreamConfig `json:"streamConfig"`
 	PTZSupported bool                 `json:"ptzSupported"`
 	GroupID      string               `json:"groupId"`
+	RecordMode   string               `json:"recordMode"`
+	PreRoll      int                  `json:"preRollSeconds"`
+	PostRoll     int                  `json:"postRollSeconds"`
 }
 
 // UpdateCameraRequest는 카메라 수정 요청이다. nil 필드는 변경하지 않는다.
@@ -62,6 +68,9 @@ type UpdateCameraRequest struct {
 	PTZSupported *bool                `json:"ptzSupported"`
 	GroupID      *string              `json:"groupId"`
 	Enabled      *bool                `json:"enabled"`
+	RecordMode   *string              `json:"recordMode"`
+	PreRoll      *int                 `json:"preRollSeconds"`
+	PostRoll     *int                 `json:"postRollSeconds"`
 }
 
 // DiscoveredCamera는 WS-Discovery로 발견된 카메라 후보다.
@@ -182,6 +191,9 @@ func (s *CameraService) CreateCamera(req CreateCameraRequest) (*CameraDTO, error
 		StreamURL:    req.StreamURL,
 		PTZSupported: req.PTZSupported,
 		GroupID:      req.GroupID,
+		RecordMode:   req.RecordMode,
+		PreRoll:      req.PreRoll,
+		PostRoll:     req.PostRoll,
 	}
 	if req.StreamConfig != nil {
 		cr.StreamConfig = *req.StreamConfig
@@ -208,6 +220,9 @@ func (s *CameraService) UpdateCamera(id string, req UpdateCameraRequest) (*Camer
 		PTZSupported: req.PTZSupported,
 		GroupID:      req.GroupID,
 		Enabled:      req.Enabled,
+		RecordMode:   req.RecordMode,
+		PreRoll:      req.PreRoll,
+		PostRoll:     req.PostRoll,
 	}
 	saved, err := s.mgr.Update(id, ur)
 	if err != nil {
@@ -529,7 +544,17 @@ func toDTO(c *camera.Camera) CameraDTO {
 		GroupID:      c.GroupID,
 		LayoutOrder:  c.LayoutOrder,
 		Enabled:      c.Enabled,
+		RecordMode:   recordModeOr(c.RecordMode),
+		PreRoll:      c.PreRoll,
+		PostRoll:     c.PostRoll,
 		AddedAt:      c.AddedAt.Format(time.RFC3339),
 		UpdatedAt:    c.UpdatedAt.Format(time.RFC3339),
 	}
+}
+
+func recordModeOr(m string) string {
+	if m == "" {
+		return camera.RecordOff
+	}
+	return m
 }

@@ -17,7 +17,47 @@ import (
 
 // Dialer는 스트림 연결 함수의 시그니처다. 테스트 시 가짜 구현으로 교체한다.
 // 블로킹 함수이며 ctx가 취소되거나 스트림이 끊기면 반환한다.
-type Dialer func(ctx context.Context, rawURL, transport string, onInfo func(Info), onPacket func(Packet)) error
+// onNALU는 녹화(Phase R)용 탭으로, nil이면 NALU 디코딩 오버헤드를 걸지 않는다.
+// nalus는 완성된 액세스 유닛 하나, pts는 단조 증가 90kHz 값(랩어라운드 보정됨), key는 IDR 포함 여부.
+type Dialer func(ctx context.Context, rawURL, transport string, onInfo func(Info), onPacket func(Packet), onNALU func(codec Codec, nalus [][]byte, pts int64, key bool)) error
+
+// tsUnwrap은 32비트 RTP 타임스탬프를 단조 증가 int64로 확장한다(랩어라운드 대응).
+type tsUnwrap struct {
+	inited bool
+	prev   uint32
+	acc    int64
+}
+
+func (u *tsUnwrap) unwrap(ts uint32) int64 {
+	if !u.inited {
+		u.inited, u.prev, u.acc = true, ts, 0
+		return 0
+	}
+	u.acc += int64(int32(ts - u.prev)) // 부호 있는 델타 = 최단 경로 (랩 대응)
+	u.prev = ts
+	return u.acc
+}
+
+// isRandomAccessAU는 액세스 유닛에 IDR(랜덤 액세스) NALU가 있는지 검사한다.
+func isRandomAccessAU(codec Codec, nalus [][]byte) bool {
+	for _, n := range nalus {
+		if len(n) == 0 {
+			continue
+		}
+		switch codec {
+		case CodecH264:
+			if n[0]&0x1f == 5 {
+				return true
+			}
+		case CodecH265:
+			switch (n[0] >> 1) & 0x3f {
+			case 19, 20, 21: // IDR_W_RADL, IDR_N_LP, CRA_NUT
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // parameterSets는 스트림 수신 중 수집하는 코덱 파라미터 셋이다.
 type parameterSets struct {
@@ -30,7 +70,7 @@ type parameterSets struct {
 
 // DialRTSP는 RTSP URL에 연결해 코덱 정보와 RTP 패킷을 콜백으로 전달한다.
 // transport는 "tcp" 또는 "udp"이며 비어 있으면 tcp를 사용한다.
-func DialRTSP(ctx context.Context, rawURL, transport string, onInfo func(Info), onPacket func(Packet)) error {
+func DialRTSP(ctx context.Context, rawURL, transport string, onInfo func(Info), onPacket func(Packet), onNALU func(codec Codec, nalus [][]byte, pts int64, key bool)) error {
 	u, err := base.ParseURL(rawURL)
 	if err != nil {
 		return fmt.Errorf("RTSP URL 파싱 실패: %w", err)
@@ -137,18 +177,25 @@ func DialRTSP(ctx context.Context, rawURL, transport string, onInfo func(Info), 
 	}
 	emitInfoIfReady()
 
+	var unwrap tsUnwrap
 	conf.OnPacketRTP(medi, forma, func(pkt *rtp.Packet) {
 		ps.mu.Lock()
 		if ps.ssrc == 0 {
 			ps.ssrc = pkt.SSRC
 		}
+		needPS := ps.sps == nil || ps.pps == nil
 		ps.mu.Unlock()
 
-		// SDP에 파라미터 셋이 없으면 스트림에서 수집한다.
-		if ps.sps == nil || ps.pps == nil {
-			if nalus, derr := decoder.Decode(pkt); derr == nil {
-				collectParameterSets(codec, nalus, ps)
-				emitInfoIfReady()
+		// 파라미터 셋 수집 또는 녹화 탭이 있으면 NALU를 디코드한다.
+		if needPS || onNALU != nil {
+			if nalus, derr := decoder.Decode(pkt); derr == nil && len(nalus) > 0 {
+				if needPS {
+					collectParameterSets(codec, nalus, ps)
+					emitInfoIfReady()
+				}
+				if onNALU != nil {
+					onNALU(codec, nalus, unwrap.unwrap(pkt.Timestamp), isRandomAccessAU(codec, nalus))
+				}
 			}
 		}
 

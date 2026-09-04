@@ -22,6 +22,9 @@ type CreateRequest struct {
 	StreamConfig StreamConfig
 	PTZSupported bool
 	GroupID      string
+	RecordMode   string
+	PreRoll      int
+	PostRoll     int
 }
 
 // UpdateRequest는 카메라 수정 요청이다. 필드가 nil이면 변경하지 않는다.
@@ -36,6 +39,9 @@ type UpdateRequest struct {
 	PTZSupported *bool
 	GroupID      *string
 	Enabled      *bool
+	RecordMode   *string
+	PreRoll      *int
+	PostRoll     *int
 }
 
 // Manager는 카메라 도메인의 상위 연산을 제공한다.
@@ -80,6 +86,9 @@ func (m *Manager) Create(req CreateRequest) (*Camera, error) {
 		StreamConfig: req.StreamConfig,
 		PTZSupported: req.PTZSupported,
 		GroupID:      req.GroupID,
+		RecordMode:   recModeOr(req.RecordMode),
+		PreRoll:      prerollOr(req.PreRoll),
+		PostRoll:     postrollOr(req.PostRoll),
 		Enabled:      true,
 	}
 	if req.Password != "" {
@@ -135,6 +144,15 @@ func (m *Manager) Update(id string, req UpdateRequest) (*Camera, error) {
 	}
 	if req.Enabled != nil {
 		cam.Enabled = *req.Enabled
+	}
+	if req.RecordMode != nil {
+		cam.RecordMode = recModeOr(*req.RecordMode)
+	}
+	if req.PreRoll != nil {
+		cam.PreRoll = *req.PreRoll
+	}
+	if req.PostRoll != nil {
+		cam.PostRoll = *req.PostRoll
 	}
 	if err := m.validateCamera(*cam); err != nil {
 		return nil, err
@@ -197,6 +215,11 @@ func (m *Manager) validateCreate(req CreateRequest) error {
 func (m *Manager) validateCamera(cam Camera) error {
 	if strings.TrimSpace(cam.Name) == "" {
 		return fmt.Errorf("카메라 이름은 필수임")
+	}
+	switch cam.RecordMode {
+	case "", RecordOff, RecordContinuous, RecordEvent, RecordBoth:
+	default:
+		return fmt.Errorf("record_mode는 off|continuous|event|both 중 하나여야 함: %q", cam.RecordMode)
 	}
 	switch cam.Type {
 	case TypeONVIF:

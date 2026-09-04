@@ -11,7 +11,7 @@ import (
 // camColumns는 cameras 테이블의 컬럼 순서다. SELECT/scan/INSERT가 이 순서를 공유한다.
 const camColumns = `id, name, type, xaddr, username, password, profile_token, stream_url,
 	transport, protocol, buffer_size, ptz_supported, group_id, layout_order, enabled,
-	added_at, updated_at`
+	record_mode, pre_roll_seconds, post_roll_seconds, added_at, updated_at`
 
 // SchemaSQL은 카메라 도메인의 SQLite 스키마다. internal/db의 마이그레이션이 이를 조립해 적용한다.
 const SchemaSQL = `
@@ -43,6 +43,13 @@ CREATE TABLE groups (
 	rows        INTEGER NOT NULL DEFAULT 2
 );`
 
+// RecordColumnsSQL은 Phase R 카메라별 녹화 컬럼을 추가한다.
+// internal/db 마이그레이션 #3이 이를 적용하며, cameras 테이블 단독 테스트도 재사용한다.
+const RecordColumnsSQL = `
+ALTER TABLE cameras ADD COLUMN record_mode TEXT NOT NULL DEFAULT 'off';
+ALTER TABLE cameras ADD COLUMN pre_roll_seconds INTEGER NOT NULL DEFAULT 10;
+ALTER TABLE cameras ADD COLUMN post_roll_seconds INTEGER NOT NULL DEFAULT 15;`
+
 // SQLCameraStore는 Store를 SQLite로 구현한다. 상태를 캐시하지 않고 매 호출을 DB에 위임한다.
 type SQLCameraStore struct {
 	db *sql.DB
@@ -66,7 +73,8 @@ func scanCamera(s rowScanner) (Camera, error) {
 	err := s.Scan(
 		&c.ID, &c.Name, &c.Type, &c.XAddr, &c.Username, &c.Password, &c.ProfileToken, &c.StreamURL,
 		&c.StreamConfig.Transport, &c.StreamConfig.Protocol, &c.StreamConfig.BufferSize,
-		&ptz, &c.GroupID, &c.LayoutOrder, &enabled, &addedAt, &updatedAt,
+		&ptz, &c.GroupID, &c.LayoutOrder, &enabled,
+		&c.RecordMode, &c.PreRoll, &c.PostRoll, &addedAt, &updatedAt,
 	)
 	if err != nil {
 		return Camera{}, err
@@ -86,10 +94,11 @@ type execer interface {
 // insertCamera는 Camera를 모든 필드 그대로 INSERT한다. (Add/ImportFrom 공용)
 func insertCamera(e execer, c Camera) error {
 	_, err := e.Exec(
-		`INSERT INTO cameras (`+camColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO cameras (`+camColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		c.ID, c.Name, string(c.Type), c.XAddr, c.Username, c.Password, c.ProfileToken, c.StreamURL,
 		c.StreamConfig.Transport, c.StreamConfig.Protocol, c.StreamConfig.BufferSize,
 		b2i(c.PTZSupported), c.GroupID, c.LayoutOrder, b2i(c.Enabled),
+		recModeOr(c.RecordMode), prerollOr(c.PreRoll), postrollOr(c.PostRoll),
 		c.AddedAt.UTC().Format(time.RFC3339Nano), c.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	)
 	return err
@@ -100,6 +109,26 @@ func b2i(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// record_mode/pre/post-roll의 빈 값을 스키마 기본값으로 보정한다.
+func recModeOr(m string) string {
+	if m == "" {
+		return RecordOff
+	}
+	return m
+}
+func prerollOr(n int) int {
+	if n <= 0 {
+		return 10
+	}
+	return n
+}
+func postrollOr(n int) int {
+	if n <= 0 {
+		return 15
+	}
+	return n
 }
 
 // List는 모든 카메라를 layout_order 순으로 반환한다.
@@ -177,10 +206,12 @@ func (s *SQLCameraStore) Update(cam Camera) (*Camera, error) {
 	_, err = s.db.Exec(
 		`UPDATE cameras SET name=?, type=?, xaddr=?, username=?, password=?, profile_token=?,
 		 stream_url=?, transport=?, protocol=?, buffer_size=?, ptz_supported=?, group_id=?,
-		 layout_order=?, enabled=?, updated_at=? WHERE id=?`,
+		 layout_order=?, enabled=?, record_mode=?, pre_roll_seconds=?, post_roll_seconds=?,
+		 updated_at=? WHERE id=?`,
 		cam.Name, string(cam.Type), cam.XAddr, cam.Username, cam.Password, cam.ProfileToken,
 		cam.StreamURL, cam.StreamConfig.Transport, cam.StreamConfig.Protocol, cam.StreamConfig.BufferSize,
 		b2i(cam.PTZSupported), cam.GroupID, cam.LayoutOrder, b2i(cam.Enabled),
+		recModeOr(cam.RecordMode), prerollOr(cam.PreRoll), postrollOr(cam.PostRoll),
 		cam.UpdatedAt.Format(time.RFC3339Nano), cam.ID,
 	)
 	if err != nil {

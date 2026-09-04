@@ -13,6 +13,14 @@ const (
 	TypeRTMP  CameraType = "rtmp"
 )
 
+// RecordMode는 카메라별 녹화 방식이다(Phase R). event/both는 R.4에서 배선된다.
+const (
+	RecordOff        = "off"
+	RecordContinuous = "continuous"
+	RecordEvent      = "event"
+	RecordBoth       = "both"
+)
+
 // StreamConfig는 개별 카메라의 스트림 수신 옵션이다.
 type StreamConfig struct {
 	Transport  string `json:"transport"` // "tcp" | "udp"
@@ -35,6 +43,9 @@ type Camera struct {
 	GroupID      string       `json:"group_id,omitempty"`
 	LayoutOrder  int          `json:"layout_order"`
 	Enabled      bool         `json:"enabled"`
+	RecordMode   string       `json:"record_mode,omitempty"`   // off(기본) | continuous | event | both
+	PreRoll      int          `json:"pre_roll_seconds,omitempty"`
+	PostRoll     int          `json:"post_roll_seconds,omitempty"`
 	AddedAt      time.Time    `json:"added_at"`
 	UpdatedAt    time.Time    `json:"updated_at"`
 }

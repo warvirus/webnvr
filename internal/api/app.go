@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"webnvr/internal/config"
 	"webnvr/internal/db"
 	"webnvr/internal/logging"
+	"webnvr/internal/recording"
 	"webnvr/internal/ws"
 )
 
@@ -28,6 +30,7 @@ type App struct {
 	wsServer  *ws.Server
 	logCloser io.Closer
 	database  *db.DB
+	recording *recording.Manager // config.Recording.Enabled일 때만 생성됨
 }
 
 // New는 설정 디렉토리를 기준으로 모든 서비스를 초기화한다.
@@ -64,12 +67,33 @@ func New(configDir string) (*App, error) {
 	}
 
 	cameraSvc := &CameraService{mgr: mgr, appCfg: appCfg, configDir: configDir, database: database}
-	return &App{
+	streamSvc := NewStreamService(mgr)
+
+	app := &App{
 		Camera:    cameraSvc,
-		Stream:    NewStreamService(mgr),
+		Stream:    streamSvc,
 		logCloser: logCloser,
 		database:  database,
-	}, nil
+	}
+
+	// 녹화 매니저 (Phase R) — enabled일 때만. Hub 영구 ref로 24/7 RTSP 세션을 유지한다.
+	if appCfg.Recording.Enabled {
+		recMgr, err := recording.NewManager(
+			appCfg.Recording, recording.NewStore(database.SQL()), streamSvc.Hub(), mgr)
+		if err != nil {
+			logCloser.Close()
+			database.Close()
+			return nil, fmt.Errorf("녹화 매니저 초기화 실패: %w", err)
+		}
+		if err := recMgr.Start(context.Background()); err != nil {
+			recMgr.Close()
+			logCloser.Close()
+			database.Close()
+			return nil, fmt.Errorf("녹화 시작 실패: %w", err)
+		}
+		app.recording = recMgr
+	}
+	return app, nil
 }
 
 // ensureMasterKey는 마스터 키를 확보하고 필요 시 레거시 폴백 키로 암호화된
@@ -215,6 +239,9 @@ func (a *App) StopWSServer() {
 // Close는 서버와 로거를 정지하고 리소스를 정리한다.
 func (a *App) Close() {
 	a.StopWSServer()
+	if a.recording != nil {
+		a.recording.Close() // 진행 중 세그먼트 flush + INSERT (DB 닫기 전)
+	}
 	if a.database != nil {
 		_ = a.database.Close()
 	}

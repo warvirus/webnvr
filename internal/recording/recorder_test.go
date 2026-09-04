@@ -101,6 +101,10 @@ func TestRecorderRotatesOnTimeAndSize(t *testing.T) {
 			t.Errorf("bytes 미기록: %+v", g)
 		}
 	}
+	// seg1: openPTS=90000, lastPTS=180000 → dur_ms = 90000*1000/90000 = 1000
+	if rows[0].DurMS != 1000 {
+		t.Errorf("seg1 dur_ms = %d, want 1000", rows[0].DurMS)
+	}
 }
 
 func TestRecorderGapMarksDiscontinuity(t *testing.T) {
