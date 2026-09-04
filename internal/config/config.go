@@ -9,6 +9,7 @@ type AppConfig struct {
 	Discovery DiscoveryConfig `json:"discovery"`
 	Decoder   DecoderConfig   `json:"decoder"`
 	Logging   LoggingConfig   `json:"logging"`
+	Recording RecordingConfig `json:"recording"`
 }
 
 // ServerConfig는 HTTP/WS 서버의 바인드 주소와 포트 설정을 나타낸다.
@@ -48,6 +49,34 @@ type LoggingConfig struct {
 	MaxBackups int    `json:"max_backups"`
 }
 
+// RecordingConfig는 백엔드 녹화(Phase R) 동작을 나타낸다.
+// enabled=false면 녹화기가 생성되지 않고 기존 동작이 완전히 유지된다.
+type RecordingConfig struct {
+	Enabled        bool             `json:"enabled"`
+	MaxUsageGB     float64          `json:"max_usage_gb"`     // 0 = 무제한(디스크 한도까지)
+	ReclaimPercent int              `json:"reclaim_percent"`  // 한도 초과 시 삭제로 확보할 여유 비율
+	RetentionDays  int              `json:"retention_days"`   // 0 = 시간 제한 없음
+	KeepMinHours   int              `json:"keep_min_hours"`   // 이보다 최근 녹화는 공간 부족해도 유지
+	ReconcileHours int              `json:"reconcile_hours"`  // 발자국 재조정(SUM(bytes)+du 대조) 주기
+	Storages       []StorageConfig  `json:"storages"`         // fill-then-next
+	SegmentSeconds int              `json:"segment_seconds"`  // 세그먼트 목표 길이
+	SegmentMaxMB   int              `json:"segment_max_mb"`   // 키프레임이 안 와도 이 크기에서 강제 컷
+	Transcode      TranscodeConfig  `json:"transcode"`        // 후속 H — v1은 비활성
+}
+
+// StorageConfig는 녹화 저장 대상 하나다.
+type StorageConfig struct {
+	Path           string `json:"path"`
+	MinFreePercent int    `json:"min_free_percent"` // 공유 디스크에서 OS·타 앱 보호
+}
+
+// TranscodeConfig는 압축 비효율 코덱의 재인코딩 훅이다(후속 H, v1 미사용).
+type TranscodeConfig struct {
+	Enabled     bool   `json:"enabled"`
+	TargetCodec string `json:"target_codec"`
+	FFmpegPath  string `json:"ffmpeg_path"`
+}
+
 // CurrentVersion은 현재 설정 스키마 버전이다.
 const CurrentVersion = 1
 
@@ -82,6 +111,18 @@ func Default() *AppConfig {
 			File:       "logs/app.log",
 			MaxSizeMB:  100,
 			MaxBackups: 5,
+		},
+		Recording: RecordingConfig{
+			Enabled:        false,
+			MaxUsageGB:     0,
+			ReclaimPercent: 10,
+			RetentionDays:  0,
+			KeepMinHours:   1,
+			ReconcileHours: 6,
+			Storages:       []StorageConfig{{Path: "recordings", MinFreePercent: 5}},
+			SegmentSeconds: 300,
+			SegmentMaxMB:   512,
+			Transcode:      TranscodeConfig{Enabled: false, TargetCodec: "h264", FFmpegPath: ""},
 		},
 	}
 }

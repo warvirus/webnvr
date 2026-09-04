@@ -27,6 +27,20 @@ func TestOpen_FreshSchema(t *testing.T) {
 	if ver != len(migrations) {
 		t.Fatalf("user_version=%d, 기대 %d", ver, len(migrations))
 	}
+	// 마이그레이션 #2 — 녹화 테이블 존재 확인
+	for _, tbl := range []string{"segments", "events"} {
+		var name string
+		err := d.SQL().QueryRow(
+			"SELECT name FROM sqlite_master WHERE type='table' AND name=?", tbl).Scan(&name)
+		if err != nil {
+			t.Fatalf("%s 테이블 없음: %v", tbl, err)
+		}
+	}
+	if _, err := d.SQL().Exec(
+		`INSERT INTO segments(camera_id, start_ts, rel_path) VALUES ('cam-1', 1000, 'a/b.ts')`); err != nil {
+		t.Fatalf("segments INSERT: %v", err)
+	}
+
 	// 재열기 = 무동작
 	d.Close()
 	d2, err := Open(dir)

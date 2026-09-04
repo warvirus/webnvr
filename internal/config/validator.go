@@ -73,6 +73,51 @@ func Validate(cfg *AppConfig) error {
 	if cfg.Logging.MaxBackups < 0 {
 		return fmt.Errorf("logging.max_backups는 0 이상이어야 함: %d", cfg.Logging.MaxBackups)
 	}
+
+	if err := validateRecording(&cfg.Recording); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateRecording은 녹화 설정을 검증한다. enabled=false면 값이 비어 있어도 통과시킨다
+// (기존 설정 호환 — 녹화기가 생성되지 않으므로 무해).
+func validateRecording(r *RecordingConfig) error {
+	if r.MaxUsageGB < 0 {
+		return fmt.Errorf("recording.max_usage_gb는 0 이상이어야 함: %v", r.MaxUsageGB)
+	}
+	if r.ReclaimPercent < 0 || r.ReclaimPercent > 90 {
+		return fmt.Errorf("recording.reclaim_percent는 0~90이어야 함: %d", r.ReclaimPercent)
+	}
+	if r.RetentionDays < 0 {
+		return fmt.Errorf("recording.retention_days는 0 이상이어야 함: %d", r.RetentionDays)
+	}
+	if r.KeepMinHours < 0 {
+		return fmt.Errorf("recording.keep_min_hours는 0 이상이어야 함: %d", r.KeepMinHours)
+	}
+	for i := range r.Storages {
+		if r.Storages[i].MinFreePercent < 0 || r.Storages[i].MinFreePercent > 99 {
+			return fmt.Errorf("recording.storages[%d].min_free_percent는 0~99이어야 함: %d", i, r.Storages[i].MinFreePercent)
+		}
+	}
+	if !r.Enabled {
+		return nil
+	}
+	// enabled일 때만 실제 동작에 필요한 값을 강제한다.
+	if len(r.Storages) == 0 {
+		return fmt.Errorf("recording.enabled이면 storages가 최소 1개 필요함")
+	}
+	for i := range r.Storages {
+		if strings.TrimSpace(r.Storages[i].Path) == "" {
+			return fmt.Errorf("recording.storages[%d].path가 비어 있음", i)
+		}
+	}
+	if r.SegmentSeconds <= 0 {
+		return fmt.Errorf("recording.segment_seconds는 양수여야 함: %d", r.SegmentSeconds)
+	}
+	if r.SegmentMaxMB <= 0 {
+		return fmt.Errorf("recording.segment_max_mb는 양수여야 함: %d", r.SegmentMaxMB)
+	}
 	return nil
 }
 

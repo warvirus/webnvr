@@ -27,6 +27,30 @@ var migrations = []string{
 		id   INTEGER PRIMARY KEY CHECK (id = 1),
 		data TEXT NOT NULL
 	);`,
+	// #2 — Phase R 녹화 인덱스. 세그먼트를 닫을 때마다 INSERT 한 줄, 모든 재생/janitor 조회가 인덱스 range.
+	`CREATE TABLE segments (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		camera_id   TEXT NOT NULL,
+		kind        TEXT NOT NULL DEFAULT 'continuous',   -- continuous | event
+		start_ts    INTEGER NOT NULL,                     -- 벽시계 epoch ms (세그먼트 시작)
+		start_pts   INTEGER NOT NULL DEFAULT 0,           -- 90kHz PTS (내부 연속성 판정용)
+		dur_ms      INTEGER NOT NULL DEFAULT 0,
+		storage_idx INTEGER NOT NULL DEFAULT 0,
+		rel_path    TEXT NOT NULL,                        -- storage 루트 기준 상대 경로
+		bytes       INTEGER NOT NULL DEFAULT 0,
+		flags       INTEGER NOT NULL DEFAULT 0,           -- bit0 = 앞 구간과 불연속
+		codec       TEXT NOT NULL DEFAULT 'h264'
+	);
+	CREATE INDEX idx_segments_cam_ts ON segments(camera_id, start_ts);
+	CREATE TABLE events (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		camera_id  TEXT NOT NULL,
+		ts         INTEGER NOT NULL,                      -- 벽시계 epoch ms
+		type       TEXT NOT NULL,                         -- manual | schedule | onvif ...
+		segment_id INTEGER,                               -- 연결된 이벤트 클립 세그먼트
+		note       TEXT NOT NULL DEFAULT ''
+	);
+	CREATE INDEX idx_events_cam_ts ON events(camera_id, ts);`,
 }
 
 // DB는 열린 SQLite 연결과 설정 디렉토리를 감싼다.
