@@ -134,10 +134,18 @@ type CameraService struct {
 	appCfg    *config.AppConfig
 	configDir string
 	database  *db.DB
+	notifier  changeBroadcaster // App 조립 시 주입(nil 허용 — 헤드리스 도구/유닛 테스트)
 }
 
 // SetConfigDir는 설정 디렉토리를 지정한다. (App 조립 시 호출)
 func (s *CameraService) SetConfigDir(dir string) { s.configDir = dir }
+
+// notifyCameras는 카메라 변경을 브로드캐스트한다. (notifier가 nil이면 무동작)
+func (s *CameraService) notifyCameras(reason, cameraID string) {
+	if s.notifier != nil {
+		s.notifier.BroadcastCamerasChanged(reason, cameraID)
+	}
+}
 
 // ListCameras는 모든 카메라를 반환한다.
 func (s *CameraService) ListCameras() ([]CameraDTO, error) {
@@ -183,6 +191,7 @@ func (s *CameraService) CreateCamera(req CreateCameraRequest) (*CameraDTO, error
 		return nil, err
 	}
 	dto := toDTO(saved)
+	s.notifyCameras("added", saved.ID)
 	return &dto, nil
 }
 
@@ -205,17 +214,26 @@ func (s *CameraService) UpdateCamera(id string, req UpdateCameraRequest) (*Camer
 		return nil, err
 	}
 	dto := toDTO(saved)
+	s.notifyCameras("updated", id)
 	return &dto, nil
 }
 
 // DeleteCamera는 카메라를 삭제한다.
 func (s *CameraService) DeleteCamera(id string) error {
-	return s.mgr.Delete(id)
+	if err := s.mgr.Delete(id); err != nil {
+		return err
+	}
+	s.notifyCameras("deleted", id)
+	return nil
 }
 
 // ReorderCameras는 카메라 표시 순서를 변경한다.
 func (s *CameraService) ReorderCameras(cameraIDs []string) error {
-	return s.mgr.Reorder(cameraIDs)
+	if err := s.mgr.Reorder(cameraIDs); err != nil {
+		return err
+	}
+	s.notifyCameras("reordered", "")
+	return nil
 }
 
 // DiscoverONVIFCameras는 로컬 네트워크의 ONVIF 카메라를 검색한다.
@@ -382,6 +400,9 @@ func (s *CameraService) UpdateAppConfig(raw map[string]any) (*config.AppConfig, 
 		return nil, err
 	}
 	s.appCfg = cfg
+	if s.notifier != nil {
+		s.notifier.BroadcastConfigChanged()
+	}
 	return cfg, nil
 }
 
@@ -440,6 +461,7 @@ func (s *CameraService) RestoreBackup(backup BackupFile) (int, error) {
 		}
 		added++
 	}
+	s.notifyCameras("restored", "")
 	return added, nil
 }
 

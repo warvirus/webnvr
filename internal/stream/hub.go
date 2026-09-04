@@ -135,6 +135,15 @@ func (h *Hub) StopAll() error {
 	return nil
 }
 
+// Reload는 실행 중인 세션을 강제 종료한다. 구독자에게 StoppedEvent를 보내고 채널을 닫으며
+// URI 캐시도 폐기한다(다음 재다이얼이 ONVIF를 다시 조회하도록). 구독자(WS 클라이언트)는
+// desired 상태에 따라 리컨실리어가 재시작하며, 이때 변경된 카메라 설정이 반영된다.
+// 비공개 closeSession이 아니라 close(_, true)를 호출한다 — closeSession은 맵에서 먼저
+// 세션을 지워 dial 고루틴의 deferred close가 조기 반환하고 구독자 채널이 닫히지 않는다.
+func (h *Hub) Reload(cameraID string) {
+	h.close(cameraID, true)
+}
+
 // Subscribe는 구독자 채널과 구독 해제 함수를 반환한다.
 // 스트림이 실행 중이어야 하며, 채널로 Started/Packet/Stopped 이벤트가 순서대로 전달된다.
 // 늦게 합류한 구독자(2번째 클라이언트 등)에게는 코덱 메타데이터(StartedEvent)를

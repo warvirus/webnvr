@@ -318,7 +318,8 @@ App
 #### 4.3.1 MonitoringPage
 
 - WS 연결/메시지 라우터는 `App.tsx`에서 전역 초기화한다(§4.1). MonitoringPage는 별도로 `init()`을 호출하지 않는다.
-- `useEffect([cameras, ...])` — 마운트/카메라 변경 시 `cameras.filter(c => c.enabled)` 각각 `startStream(id)`, cleanup에서 `stopStream(id)`. 다른 클라이언트는 백엔드 참조 카운팅 덕에 무영향.
+- `useEffect([cameras, ...])` — 활성 카메라 id 집합(`appliedRef`)을 추적해 **추가/삭제분만** `startStream`/`stopStream`. 언마운트 전용 effect가 남은 구독을 정리. (이름 변경 등에 전 채널이 깜빡이지 않도록.) 다른 클라이언트는 백엔드 참조 카운팅 덕에 무영향.
+- 보던 카메라가 다른 클라이언트에 의해 삭제되면 `selectedId`를 정리하는 effect.
 - `selectedId`(로컬) — 타일 클릭으로 토글. `selectedCamera.ptzSupported && state === 'streaming'`이면 하단에 `<PTZControl/>` 섹션 표시(닫기 버튼).
 - 배너 — `!connected`면 `백엔드와 연결이 끊겼습니다. 자동으로 재연결 중…`, `lastError`면 메시지 + `닫기`.
 - 빈 상태(`cameras.length === 0`) — `등록된 카메라가 없습니다` + `카메라 관리로 이동` 버튼.
@@ -387,7 +388,8 @@ App
   - `onError(id, msg)` → `states[id] = 'error'`, `lastError = msg`.
   - `onStats(id, s)` → `stats[id]` 갱신 + `history[id]`에 `{fps, kbps}` 추가(60개로 트림).
 - `init()` — `wsService.on/onStatus/onRejected` 등록 + `connect()` + `ensureReconciler()`. cleanup에서 리스너 해제.
-  - 메시지 라우터 `switch(msg.type)` — `stream_started`(`hub.detach` → `attach` + `config({codec, sps, pps, vps, clockRate})`, `states='starting'`, `resolution` 저장. 화면 전환은 `onDecoded`에서), `rtp_packet`/`rtp_batch`(각 패킷을 `PacketIn`으로 → `hub.packet`), `stream_stopped`(`hub.detach` + 상태 삭제), `stream_error`(`states='error'`), `pong`(무시).
+  - 메시지 라우터 `switch(msg.type)` — `stream_started`(`hub.detach` → `attach` + `config({codec, sps, pps, vps, clockRate})`, `states='starting'`, `resolution` 저장. 화면 전환은 `onDecoded`에서), `rtp_packet`/`rtp_batch`(각 패킷을 `PacketIn`으로 → `hub.packet`), `stream_stopped`(`hub.detach` + 상태 삭제), `stream_error`(`states='error'`), `cameras_changed`(`added`/`deleted` → 디바운스 `fetchCameras()`, 그 외 → `pendingCameraUpdate` 누적), `config_changed`(`webnvr-config-changed` 커스텀 이벤트 디스패치), `pong`(무시).
+  - `pendingCameraUpdate {count, ids, reloadAll}` + `applyCameraUpdate()` — 툴바 배지 클릭 시 `fetchCameras()` 후 변경 카메라에 `reload_stream` 전송.
   - `onStatus(connected)` — 끊기면 전 세션 detach + `states/stats/history` 삭제(`desired`는 유지 → 재연결 시 리컨실리어가 복구). 재연결 시 백오프/`lastAttemptAt` 초기화로 즉시 복구.
   - `onRejected(retryAt)` — `rejected = true` (`ClientLimitOverlay` 표시).
 - `startStream` / `stopStream` / `startAllStreams` / `stopAllStreams` / `ptzControl` — 각각 `desired` 설정/해제 + WS 송신 + Hub attach/detach.
@@ -513,6 +515,7 @@ App
 | `MsgRequestKeyframe` | `request_keyframe` | 미구현 → `stream_error` |
 | `MsgSubscribe` | `subscribe` | `start_stream` 별칭 |
 | `MsgUnsubscribe` | `unsubscribe` | 구독만 해제 |
+| `MsgReloadStream` | `reload_stream` | 실행 중인 RTSP 세션 강제 종료 → 리컨실리어가 새 설정으로 재다이얼 (설정 변경 반영) |
 | `MsgPing` | `ping` | → `pong` |
 
 **서버 → 클라이언트**
@@ -524,14 +527,15 @@ App
 | `MsgRTPBatch` | `rtp_batch` | O | `type, cameraId, codec, packets: {p, ts, m?, sq}[]` (≤128) |
 | `MsgStreamStopped` | `stream_stopped` | O | `cameraId, reason` |
 | `MsgStreamError` | `stream_error` | O | `cameraId, error` |
-| `MsgCameraDiscovered` | `camera_discovered` | 미발행 (선언만) | — |
-| `MsgCameraStatus` | `camera_status` | 미발행 (선언만) | — |
+| `MsgCamerasChanged` | `cameras_changed` | O (카메라 CRUD/재정렬/복원) | `reason`(added\|updated\|deleted\|reordered\|restored), `cameraId`(단일 변경 시) |
+| `MsgConfigChanged` | `config_changed` | O (`PUT /api/config`) | `type` |
 | `MsgStats` | `stats` | 미발행 (선언만) | — |
 | `MsgPong` | `pong` | O | `type` |
 | `MsgClientLimitExceeded` | `client_limit_exceeded` | O (max_clients 초과) | `type` |
 
 - `rtp_batch`의 축약 키 — `p`(base64 payload), `ts`(uint32 timestamp), `m`(bool marker, 생략 가능), `sq`(uint16 sequence).
 - **재생 의미론** — `start_stream`/`subscribe` = 시작 + 구독. 마지막 구독자가 `unsubscribe`/연결 종료하면 백엔드가 RTSP 세션을 해제(`refs == 0`). `stop_all_streams`는 이 연결에만 적용된다.
+- **실시간 설정 반영** — mutation 시 `CameraService`가 `ws.Server.Broadcast`(conns 스냅샷 → conn별 goroutine)로 전 클라이언트에 통지한다. `added`/`deleted`는 프론트가 즉시 `fetchCameras()`(250ms 디바운스)로 반영하고, `updated`/`reordered`/`restored`는 툴바 "설정 변경 적용" 배지로 누적했다가 사용자가 클릭하면 `fetchCameras()` + 변경 카메라에 `reload_stream`을 보낸다. `reload_stream`을 받은 허브가 `Hub.Reload`(= `close(id, true)`)로 세션을 끊으면 그 카메라 구독자 전원이 `stream_stopped` 후 리컨실리어로 새 설정 재다이얼한다. `config_changed`는 SettingsPage가 열려 있으면 자동 재조회한다.
 
 ### 5.3 설정 파일 스키마
 
@@ -641,6 +645,7 @@ WebGL2 단일 텍스처 RGBA 패스스루(YUV→RGB는 `texImage2D(VideoFrame)`�
 | `3c5782f`~`1f3e167` | UI 정리 | 채널 시작 버튼 제거, 분할 버튼 그룹 `[A][1][4][9][16][25]`, 페이저 Toolbar 이동, 활성 앰버 강조, 그리드 gap 축소 |
 | (미커밋) | 더블클릭 줌 재설계 | `focusedCameraId` 제거 → `zoomReturnMode` + `zoomToggle` (§4.6) |
 | (미커밋) | 헤드리스 실행 | `cmd/server/main.go` + `main.go -headless`. 부수로 `fs.Sub(assets,"frontend/dist")`로 외부 브라우저 UI 서빙 버그 수정 |
+| (미커밋, 2026-09-04) | 실시간 설정 반영 | `ws.Server.Broadcast` + `cameras_changed`/`config_changed`/`reload_stream` 메시지. 추가/삭제는 즉시, 수정/재정렬/복원은 툴바 배지→클릭 반영(§5.2). `Hub.Reload`(=`close(id,true)`)로 세션 재다이얼 |
 
 ### 7.4 트러블슈팅 (MEMORY.md T1~T4)
 

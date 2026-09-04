@@ -3,9 +3,19 @@
 // VideoDecoder 출력이 동작하지 않는 사례 대응 — F8). VideoDecoder는 비동기 HW 가속.
 import {create} from 'zustand';
 import {wsService} from '../services/ws';
+import {useCameraStore} from './cameraStore';
+import {consumeSelfEdit} from './selfEdits';
 import {DecoderHub} from '../services/decoder';
 import {PacketIn} from '../types/stream';
 import {StatSample, StreamState, StreamStats} from '../types/stream';
+
+// 다른 클라이언트가 카메라를 수정/재정렬/복원했을 때 툴바에 띄우는 "적용 대기" 상태.
+// 추가/삭제는 즉시 반영하므로 여기에 담지 않는다.
+export interface PendingCameraUpdate {
+  count: number;      // 수신한 변경 알림 수 (배지 표시용)
+  ids: string[];      // 재연결 대상 카메라 ID (updated)
+  reloadAll: boolean; // restored — 스트리밍 중인 전 카메라 재연결
+}
 
 // 통계 히스토리 샘플 (스파크라인용) — types/stream에서 재노출
 export type {StatSample} from '../types/stream';
@@ -30,12 +40,15 @@ interface StreamStoreState {
   retryAt: number | null;
   // 연결이 끊긴 동안 다음 WS 재시도 예정 시각(epoch ms). 연결되면 null.
   reconnectAt: number | null;
+  // 다른 클라이언트의 카메라 수정/재정렬/복원 — 사용자가 툴바 버튼으로 반영한다.
+  pendingCameraUpdate: PendingCameraUpdate;
 
   startStream: (cameraId: string) => void;
   stopStream: (cameraId: string) => void;
   startAllStreams: (cameraIds: string[]) => void;
   stopAllStreams: () => void;
   ptzControl: (cameraId: string, command: {action: 'move' | 'stop' | 'preset'; pan?: number; tilt?: number; zoom?: number; presetToken?: string}) => void;
+  applyCameraUpdate: () => Promise<void>;
   init: () => () => void;
 }
 
@@ -53,6 +66,15 @@ let nextRetryAt: Record<string, number> = {};      // 실패 백오프 예정 �
 let lastAttemptAt: Record<string, number> = {};    // 마지막 start_stream 전송 시각 (비반응형)
 let reconcileTimer: ReturnType<typeof setInterval> | null = null;
 
+// ── 설정 변경 적용(reload_stream) ────────────────────────────
+// "적용" 버튼이 여러 카메라를 동시에 재연결하면 ONVIF 재조회가 몰려(thundering herd)
+// 재다이얼이 실패하고 "스트림 오류"가 쏟아진다. 카메라별로 시차를 두고,
+// teardown 후 카메라가 옛 RTSP 세션을 놓을 시간을 준 뒤 재구독한다.
+const RELOAD_STAGGER_MS = 400;      // 카메라 간 reload_stream 간격
+const RELOAD_REDIAL_DELAY_MS = 2_500; // teardown 후 재구독까지 대기 (카메라 세션 해제 여유)
+// 의도적 재연결 중인 카메라 — 뒤따르는 stream_stopped를 "예상된 정지"로 처리한다.
+const reloadingIds = new Set<string>();
+
 function retryDelayMs(attempt: number): number {
   return Math.min(RETRY_BASE_MS * 2 ** Math.min(attempt - 1, 4), RETRY_MAX_MS);
 }
@@ -60,6 +82,36 @@ function retryDelayMs(attempt: number): number {
 function ensureReconciler(): void {
   if (reconcileTimer) return;
   reconcileTimer = setInterval(() => tickReconciler(), 1_000);
+}
+
+// ── cameras_changed 처리 ─────────────────────────────────────
+// added/deleted는 목록만 새로고침하면 MonitoringPage의 id-diff effect가 반영한다.
+// 버스트(재정렬 드래그, 다중 추가)를 합치기 위해 250ms 디바운스한다.
+let refetchTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleCameraRefetch(): void {
+  if (refetchTimer) return;
+  refetchTimer = setTimeout(() => {
+    refetchTimer = null;
+    useCameraStore.getState().fetchCameras().catch(() => {
+      // 조용히 실패 — 다음 브로드캐스트/재연결에서 복구
+    });
+  }, 250);
+}
+
+// updated/reordered/restored는 자동 반영하지 않고 툴바 배지로 누적한다.
+function notePendingUpdate(reason: string | undefined, cameraId: string | undefined): void {
+  // 이 클라이언트가 만든 변경의 에코이면 자기 자신에게는 배지를 띄우지 않는다.
+  if (consumeSelfEdit(reason, cameraId)) return;
+  const cur = useStreamStore.getState().pendingCameraUpdate;
+  const ids = cur.ids.slice();
+  if (reason === 'updated' && cameraId && !ids.includes(cameraId)) ids.push(cameraId);
+  useStreamStore.setState({
+    pendingCameraUpdate: {
+      count: cur.count + 1,
+      ids,
+      reloadAll: cur.reloadAll || reason === 'restored',
+    },
+  });
 }
 
 function tickReconciler(): void {
@@ -153,6 +205,7 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
   rejected: false,
   retryAt: null,
   reconnectAt: null,
+  pendingCameraUpdate: {count: 0, ids: [], reloadAll: false},
 
   init: () => {
     console.log('🔌 streamStore.init() 시작 — WS 연결 초기화');
@@ -207,6 +260,12 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
         }
         case 'stream_stopped': {
           getHub().detach(cameraId);
+          if (reloadingIds.has(cameraId)) {
+            // 의도적 재연결 — 상태를 지우지 않고 'starting' 유지 (곧 start_stream 재전송).
+            // 리컨실리어는 lastAttemptAt이 최신이라 20초 동안 개입하지 않는다.
+            set(s => ({states: {...s.states, [cameraId]: 'starting'}}));
+            break;
+          }
           set(s => {
             const states = {...s.states};
             const stats = {...s.stats};
@@ -224,6 +283,17 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
           set(s => ({states: {...s.states, [cameraId]: 'error'}, lastError: msg.error ?? '알 수 없는 오류'}));
           break;
         }
+        case 'cameras_changed': {
+          if (msg.reason === 'added' || msg.reason === 'deleted') {
+            scheduleCameraRefetch(); // 즉시 반영
+          } else {
+            notePendingUpdate(msg.reason, msg.cameraId); // updated/reordered/restored → 툴바 배지
+          }
+          break;
+        }
+        case 'config_changed':
+          window.dispatchEvent(new CustomEvent('webnvr-config-changed'));
+          break;
         case 'pong':
           break;
       }
@@ -316,6 +386,37 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
 
   ptzControl: (cameraId, command) => {
     wsService.send({type: 'ptz', cameraId, command});
+  },
+
+  // 툴바 "설정 변경 적용" 버튼 — 목록을 새로고침하고, 변경된 카메라의 스트림을 재연결한다.
+  // 카메라별로 시차를 두고 teardown → 카메라가 옛 세션을 놓을 시간을 준 뒤 재구독한다
+  // (동시 재다이얼 stampede로 "스트림 오류"가 쏟아지던 문제 방지).
+  applyCameraUpdate: async () => {
+    const {reloadAll, ids} = get().pendingCameraUpdate;
+    set({pendingCameraUpdate: {count: 0, ids: [], reloadAll: false}});
+    await useCameraStore.getState().fetchCameras().catch(() => {});
+    const stateNow = get().states;
+    const targets = (reloadAll ? Object.keys(stateNow) : ids).filter(id => stateNow[id]);
+    targets.forEach((id, i) => {
+      reloadingIds.add(id);
+      // 타일은 '재연결 시도 중'으로, 리컨실리어는 20초 starting 가드로 억제한다.
+      set(s => ({
+        states: {...s.states, [id]: 'starting'},
+        retries: {...s.retries, [id]: Math.max(1, s.retries[id] ?? 0)},
+      }));
+      window.setTimeout(() => {
+        lastAttemptAt[id] = Date.now();
+        wsService.send({type: 'reload_stream', cameraId: id});
+        // 카메라가 옛 RTSP 세션을 놓은 뒤 재구독
+        window.setTimeout(() => {
+          reloadingIds.delete(id);
+          if (!get().desired[id]) return; // 그 사이 사용자가 정지했으면 중단
+          lastAttemptAt[id] = Date.now();
+          getHub().reset(id);
+          wsService.send({type: 'start_stream', cameraId: id});
+        }, RELOAD_REDIAL_DELAY_MS);
+      }, i * RELOAD_STAGGER_MS);
+    });
   },
 }));
 

@@ -17,12 +17,13 @@ import (
 
 // fakeController는 Controller 인터페이스의 테스트 구현이다.
 type fakeController struct {
-	mu      sync.Mutex
-	started []string
-	stopped []string
-	ptzCmds []PTZCommand
-	failIDs map[string]bool                // Start 실패 카메라
-	chans   map[string][]chan stream.Event // 카메라별 다중 구독자
+	mu       sync.Mutex
+	started  []string
+	stopped  []string
+	reloaded []string
+	ptzCmds  []PTZCommand
+	failIDs  map[string]bool                // Start 실패 카메라
+	chans    map[string][]chan stream.Event // 카메라별 다중 구독자
 }
 
 func newFakeController() *fakeController {
@@ -83,6 +84,17 @@ func (f *fakeController) PTZ(cameraID string, cmd PTZCommand) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ptzCmds = append(f.ptzCmds, cmd)
+	return nil
+}
+
+func (f *fakeController) ReloadStream(cameraID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reloaded = append(f.reloaded, cameraID)
+	for _, ch := range f.chans[cameraID] {
+		close(ch)
+	}
+	delete(f.chans, cameraID)
 	return nil
 }
 
@@ -395,5 +407,61 @@ func TestClientIndependentStop(t *testing.T) {
 	defer ctrl.mu.Unlock()
 	if len(ctrl.stopped) != 0 {
 		t.Errorf("B의 정지가 세션 정지로 전파됨: stopped=%v", ctrl.stopped)
+	}
+}
+
+// syncConn은 ping/pong 왕복으로 서버가 이 연결을 conns에 등록했음을 보장한다.
+func syncConn(t *testing.T, c *websocket.Conn) {
+	t.Helper()
+	if err := c.WriteJSON(ClientMsg{Type: MsgPing}); err != nil {
+		t.Fatal(err)
+	}
+	if m := recv(t, c); m.Type != MsgPong {
+		t.Fatalf("동기화 pong 미수신: %+v", m)
+	}
+}
+
+// TestServerBroadcast는 Broadcast가 접속 중인 모든 클라이언트에 전달되는지 확인한다.
+func TestServerBroadcast(t *testing.T) {
+	ctrl := newFakeController()
+	srv := newTestServer(t, ctrl)
+
+	cA := connect(t, srv)
+	cB := connect(t, srv)
+	syncConn(t, cA)
+	syncConn(t, cB)
+
+	srv.BroadcastCamerasChanged("updated", "cam-9")
+
+	for name, c := range map[string]*websocket.Conn{"A": cA, "B": cB} {
+		m := recv(t, c)
+		if m.Type != MsgCamerasChanged || m.Reason != "updated" || m.CameraID != "cam-9" {
+			t.Errorf("%s의 cameras_changed 불일치: %+v", name, m)
+		}
+	}
+
+	srv.BroadcastConfigChanged()
+	for name, c := range map[string]*websocket.Conn{"A": cA, "B": cB} {
+		if m := recv(t, c); m.Type != MsgConfigChanged {
+			t.Errorf("%s의 config_changed 불일치: %+v", name, m)
+		}
+	}
+}
+
+// TestReloadStreamMessage는 reload_stream 메시지가 Controller.ReloadStream으로 전달되는지 확인한다.
+func TestReloadStreamMessage(t *testing.T) {
+	ctrl := newFakeController()
+	srv := newTestServer(t, ctrl)
+	c := connect(t, srv)
+
+	if err := c.WriteJSON(ClientMsg{Type: MsgReloadStream, CameraID: "cam-1"}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	ctrl.mu.Lock()
+	defer ctrl.mu.Unlock()
+	if len(ctrl.reloaded) != 1 || ctrl.reloaded[0] != "cam-1" {
+		t.Errorf("ReloadStream 전달 불일치: %v", ctrl.reloaded)
 	}
 }

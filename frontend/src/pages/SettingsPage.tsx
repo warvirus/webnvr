@@ -1,8 +1,9 @@
 // 설정 페이지 — 앱 설정/보안/백업 통합 관리 (doc 5.6)
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {AppConfig, BackupFile, SecurityInfo} from '../types/api';
 import {api} from '../services/api';
 import {useUIStore} from '../store/uiStore';
+import {markSelfEdit} from '../store/selfEdits';
 
 const KEY_SOURCE_LABEL: Record<string, string> = {
   env: '환경변수 (WEBNVR_MASTER_KEY)',
@@ -18,13 +19,25 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => {
+  const loadConfig = useCallback((opts?: {silent?: boolean}) => {
     api.health()
       .then(() => api.appConfig())
       .then(setCfg)
-      .catch(e => pushToast('error', `설정 조회 실패: ${String(e)}`));
+      .catch(e => { if (!opts?.silent) pushToast('error', `설정 조회 실패: ${String(e)}`); });
     api.security().then((s: SecurityInfo) => setSecurity(s)).catch(() => setSecurity(null));
   }, [pushToast]);
+
+  useEffect(() => { loadConfig(); }, [loadConfig]);
+
+  // 다른 클라이언트가 앱 설정을 저장하면 현재 화면을 최신 값으로 갱신한다.
+  useEffect(() => {
+    const onChange = () => {
+      loadConfig({silent: true});
+      pushToast('info', '앱 설정이 다른 곳에서 변경되어 새로고침했습니다.');
+    };
+    window.addEventListener('webnvr-config-changed', onChange);
+    return () => window.removeEventListener('webnvr-config-changed', onChange);
+  }, [loadConfig, pushToast]);
 
   const patch = (section: keyof AppConfig, field: string, value: unknown): void => {
     setCfg(c => c ? {
@@ -65,6 +78,7 @@ export function SettingsPage() {
   async function importBackup(file: File) {
     try {
       const backup = JSON.parse(await file.text()) as BackupFile;
+      markSelfEdit('restored'); // 되돌아온 cameras_changed 에코로 자기 배지를 띄우지 않게
       const res = await api.restoreBackup(backup);
       pushToast('ok', `${res.restored}대의 카메라가 복원되었습니다. 비밀번호는 다시 입력해야 합니다.`);
     } catch (e) {

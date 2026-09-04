@@ -1,6 +1,6 @@
 // 모니터링 페이지 — 진입 시 자동 시작, 이탈 시 정지 (클라이언트별 독립 재생, 2026-09-02)
 // PTZ 패널은 선택된 PTZ 카메라에만 표시된다.
-import React, {useEffect, useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {CameraGrid} from '../components/grid/CameraGrid';
 import {PTZControl} from '../components/grid/PTZControl';
 import {IconGrid} from '../components/common/Icons';
@@ -32,16 +32,26 @@ export function MonitoringPage() {
   }, [fetchCameras, pushToast]);
 
   // ── 클라이언트별 재생 라이프사이클 ──
-  // 진입(마운트): 활성화된 카메라 전체 자동 시작
-  // 이탈(언마운트): 이 클라이언트의 모든 구독 해제 + 자동 재연결 의사 해제
+  // 활성 카메라 id 집합을 추적해 추가/삭제분만 start/stop 한다.
+  // (cameras 레퍼런스가 바뀔 때마다 전 채널을 끊었다 재시작하면 이름 변경 등에도 영상이 깜빡인다.)
+  // 이탈(언마운트): 이 클라이언트의 모든 구독 해제 + 자동 재연결 의사 해제.
   // 다른 클라이언트의 화면 전환은 백엔드 참조 카운팅이 관리하므로 무영향이다.
+  const appliedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    const enabledIds = cameras.filter(c => c.enabled).map(c => c.id);
-    enabledIds.forEach(id => startStream(id));
-    return () => {
-      enabledIds.forEach(id => stopStream(id));
-    };
+    const wanted = new Set(cameras.filter(c => c.enabled).map(c => c.id));
+    for (const id of wanted) if (!appliedRef.current.has(id)) startStream(id);
+    for (const id of appliedRef.current) if (!wanted.has(id)) stopStream(id);
+    appliedRef.current = wanted;
   }, [cameras, startStream, stopStream]);
+  useEffect(() => () => {
+    for (const id of appliedRef.current) stopStream(id);
+    appliedRef.current = new Set();
+  }, [stopStream]);
+
+  // 보던 카메라가 다른 클라이언트에 의해 삭제되면 선택 상태를 정리한다.
+  useEffect(() => {
+    if (selectedId && !cameras.some(c => c.id === selectedId)) setSelectedId(null);
+  }, [cameras, selectedId]);
 
   const streamingCount = useMemo(
     () => Object.values(states).filter(st => st === 'streaming').length,

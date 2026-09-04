@@ -3,7 +3,7 @@ package ws
 
 // ClientMsg는 클라이언트가 서버로 보내는 메시지다.
 type ClientMsg struct {
-	Type     string      `json:"type"` // start_stream|stop_stream|start_all_streams|stop_all_streams|ptz|request_keyframe|subscribe|unsubscribe|ping
+	Type     string      `json:"type"` // start_stream|stop_stream|start_all_streams|stop_all_streams|ptz|request_keyframe|subscribe|unsubscribe|reload_stream|ping
 	CameraID string      `json:"cameraId,omitempty"`
 	Command  *PTZCommand `json:"command,omitempty"`
 }
@@ -21,7 +21,7 @@ type PTZCommand struct {
 // ServerMsg는 서버가 클라이언트로 보내는 메시지다.
 // 목적별 필드가 하나의 구조체에 모여 있으며 omitempty로 필요한 필드만 직렬화된다.
 type ServerMsg struct {
-	Type     string `json:"type"` // stream_started|rtp_packet|stream_stopped|stream_error|camera_discovered|camera_status|stats|pong|config_updated|client_limit_exceeded
+	Type     string `json:"type"` // stream_started|rtp_packet|stream_stopped|stream_error|cameras_changed|config_changed|stats|pong|client_limit_exceeded
 	CameraID string `json:"cameraId,omitempty"`
 	Reason   string `json:"reason,omitempty"`
 	Error    string `json:"error,omitempty"`
@@ -54,6 +54,7 @@ const (
 	MsgRequestKeyframe = "request_keyframe"
 	MsgSubscribe       = "subscribe"
 	MsgUnsubscribe     = "unsubscribe"
+	MsgReloadStream    = "reload_stream" // 실행 중인 RTSP 세션을 강제 종료 → 새 설정으로 재다이얼
 	MsgPing            = "ping"
 )
 
@@ -64,8 +65,8 @@ const (
 	MsgRTPBatch            = "rtp_batch" // 여러 RTP 패킷의 배치 전송 (고비트레이트 스트림용 확장)
 	MsgStreamStopped       = "stream_stopped"
 	MsgStreamError         = "stream_error"
-	MsgCameraDiscovered    = "camera_discovered"
-	MsgCameraStatus        = "camera_status"
+	MsgCamerasChanged      = "cameras_changed" // 카메라 목록/설정 변경 — 클라이언트가 새로고침
+	MsgConfigChanged       = "config_changed"  // 앱 설정 변경
 	MsgStats               = "stats"
 	MsgPong                = "pong"
 	MsgClientLimitExceeded = "client_limit_exceeded"

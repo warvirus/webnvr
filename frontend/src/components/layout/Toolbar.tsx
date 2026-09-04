@@ -51,6 +51,9 @@ export function Toolbar() {
     Object.values(s.states).filter(st => st === 'streaming').length);
   const stats = useStreamStore(s => s.stats);
   const connected = useStreamStore(s => s.connected);
+  const pendingUpdate = useStreamStore(s => s.pendingCameraUpdate);
+  const applyCameraUpdate = useStreamStore(s => s.applyCameraUpdate);
+  const hasPendingUpdate = pendingUpdate.count > 0 || pendingUpdate.reloadAll;
 
   const titles: Record<string, {eyebrow: string; title: string}> = {
     monitoring: {eyebrow: 'Live Grid', title: '모니터링'},
@@ -116,6 +119,15 @@ export function Toolbar() {
           })()}
 
           <div className="header-actions">
+            {hasPendingUpdate && (
+              <button
+                className="btn btn-attention"
+                onClick={() => { void applyCameraUpdate(); }}
+                title="다른 곳에서 변경된 카메라 설정을 화면에 반영합니다"
+              >
+                설정 변경{pendingUpdate.count > 0 ? ` ${pendingUpdate.count}건` : ''} — 적용
+              </button>
+            )}
             <div style={{display: 'flex', gap: '8px', alignItems: 'center'}}>
               {GRID_OPTIONS.map(o => (
                 <button

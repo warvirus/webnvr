@@ -147,6 +147,8 @@ func (a *App) StartWSServer(assets http.FileSystem) error {
 	a.wsServer = ws.NewServer(a.Stream, fmt.Sprintf("%s:%d", bind, a.Camera.appCfg.Server.WSPort), func() int {
 		return a.Camera.AppConfig().Server.MaxClients
 	})
+	// 카메라/앱 설정 변경을 전 클라이언트에 브로드캐스트하도록 통지자 연결
+	a.Camera.notifier = a.wsServer
 
 	mux := http.NewServeMux()
 	mux.Handle("/ws", a.wsServer.Mux())

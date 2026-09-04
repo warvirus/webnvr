@@ -18,6 +18,9 @@ type Controller interface {
 	StartAll() error
 	Subscribe(cameraID string) (<-chan stream.Event, func(), error)
 	PTZ(cameraID string, cmd PTZCommand) error
+	// ReloadStream은 실행 중인 RTSP 세션을 강제 종료한다. 구독자는 desired 상태에 따라
+	// 자동 재시작되며, 재다이얼 시 변경된 카메라 설정이 반영된다.
+	ReloadStream(cameraID string) error
 }
 
 // connState는 연결 하나의 상태다.
@@ -30,9 +33,12 @@ type connState struct {
 }
 
 // sendRaw는 임의 메시지를 직렬화해 전송한다. (쓰기 락 보호)
+// 쓰기 데드라인을 걸어 반쯤 끊긴 커넥션에서 WriteJSON이 wmu를 영구 점유하고
+// pump/브로드캐스트를 정지시키는 것을 막는다.
 func (s *connState) sendRaw(v any) {
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
+	_ = s.conn.SetWriteDeadline(time.Now().Add(writeWait))
 	_ = s.conn.WriteJSON(v)
 }
 
@@ -190,6 +196,10 @@ func (s *connState) handleClientMsg(ctrl Controller, m ClientMsg) {
 		s.stopStream(m.CameraID, "사용자 정지")
 	case MsgUnsubscribe:
 		s.unsubscribe(m.CameraID)
+	case MsgReloadStream:
+		if err := ctrl.ReloadStream(m.CameraID); err != nil {
+			s.handleError(m.CameraID, err.Error())
+		}
 	case MsgStartAllStreams:
 		if err := ctrl.StartAll(); err != nil {
 			s.handleError("", err.Error())

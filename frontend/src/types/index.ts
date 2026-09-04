@@ -11,6 +11,7 @@ export interface ClientMsg {
     | 'request_keyframe'
     | 'subscribe'
     | 'unsubscribe'
+    | 'reload_stream'
     | 'ping';
   cameraId?: string;
   command?: PTZCommand;
@@ -33,11 +34,10 @@ export interface ServerMsg {
     | 'rtp_batch'
     | 'stream_stopped'
     | 'stream_error'
-    | 'camera_discovered'
-    | 'camera_status'
+    | 'cameras_changed'
+    | 'config_changed'
     | 'stats'
     | 'pong'
-    | 'config_updated'
     | 'client_limit_exceeded';
   cameraId?: string;
   reason?: string;

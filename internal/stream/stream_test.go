@@ -459,3 +459,59 @@ func TestHubRefCount(t *testing.T) {
 		t.Error("모든 구독자 해제 후에도 세션이 유지됨 (종료되어야 함)")
 	}
 }
+
+// notifyingSource는 testCameraSource + StreamFailureNotifier 구현이다.
+type notifyingSource struct {
+	testCameraSource
+	mu     sync.Mutex
+	failed []string
+}
+
+func (s *notifyingSource) OnStreamFailed(cameraID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failed = append(s.failed, cameraID)
+}
+
+// TestHubReload는 Reload가 구독자에게 StoppedEvent를 보내고 채널을 닫으며
+// 세션을 제거하고 실패 통지(URI 캐시 폐기)를 하는지 확인한다.
+func TestHubReload(t *testing.T) {
+	src := &notifyingSource{testCameraSource: testCameraSource{urls: map[string]string{"cam-1": "rtsp://127.0.0.1:1/stream"}}}
+	hub := NewHub(src, fakeDialer(1000))
+
+	if err := hub.Start("cam-1"); err != nil {
+		t.Fatalf("Start() err = %v", err)
+	}
+	chA, cancelA, err := hub.Subscribe("cam-1")
+	if err != nil {
+		t.Fatalf("Subscribe(A) err = %v", err)
+	}
+	defer cancelA()
+	chB, cancelB, err := hub.Subscribe("cam-1")
+	if err != nil {
+		t.Fatalf("Subscribe(B) err = %v", err)
+	}
+	defer cancelB()
+
+	hub.Reload("cam-1")
+
+	for name, ch := range map[string]<-chan Event{"A": chA, "B": chB} {
+		evts := collectEvents(ch, 2*time.Second, nil) // 채널이 닫힐 때까지 수집
+		if len(evts) == 0 {
+			t.Fatalf("%s: 이벤트 없음 (StoppedEvent 기대)", name)
+		}
+		last := evts[len(evts)-1]
+		if _, ok := last.(StoppedEvent); !ok {
+			t.Errorf("%s: 마지막 이벤트가 StoppedEvent가 아님: %T", name, last)
+		}
+	}
+
+	if _, ok := hub.Info("cam-1"); ok {
+		t.Error("Reload 후에도 세션이 실행 중으로 표시됨")
+	}
+	src.mu.Lock()
+	defer src.mu.Unlock()
+	if len(src.failed) == 0 || src.failed[0] != "cam-1" {
+		t.Errorf("OnStreamFailed 미호출: %v", src.failed)
+	}
+}

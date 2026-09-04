@@ -1,6 +1,7 @@
 // 카메라 목록 상태와 백엔드 HTTP API 호출(낙관적 업데이트 + 롤백)을 관리하는 스토어
 import {create} from 'zustand';
 import {api} from '../services/api';
+import {markSelfEdit} from './selfEdits';
 import {
   CameraDTO,
   CreateCameraRequest,
@@ -71,6 +72,7 @@ export const useCameraStore = create<CameraState>((set, get) => ({
   },
 
   updateCamera: async (id, req) => {
+    markSelfEdit('updated', id); // 되돌아온 cameras_changed 에코로 자기 배지를 띄우지 않게
     const prev = get().cameras;
     // 낙관적 업데이트: 요청 필드를 즉시 반영하고, 실패하면 롤백한다
     const patch: Partial<CameraDTO> = {};
@@ -111,6 +113,7 @@ export const useCameraStore = create<CameraState>((set, get) => ({
   },
 
   reorderCameras: async (orderedIds) => {
+    markSelfEdit('reordered');
     const prev = get().cameras;
     const byId = new Map(prev.map(c => [c.id, c]));
     const reordered = orderedIds

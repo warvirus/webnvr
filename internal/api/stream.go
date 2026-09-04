@@ -141,6 +141,13 @@ func (s *StreamService) Subscribe(cameraID string) (<-chan stream.Event, func(),
 	return s.hub.Subscribe(cameraID)
 }
 
+// ReloadStream은 실행 중인 RTSP 세션을 강제 종료한다. (ws.Controller 구현)
+// 구독자는 desired 상태에 따라 자동 재시작되며, 재다이얼 시 변경된 카메라 설정을 반영한다.
+func (s *StreamService) ReloadStream(cameraID string) error {
+	s.hub.Reload(cameraID)
+	return nil
+}
+
 // PTZ는 카메라에 PTZ 명령을 전달한다. (ws.Controller 구현)
 func (s *StreamService) PTZ(cameraID string, cmd ws.PTZCommand) error {
 	cam, err := s.mgr.Get(cameraID)

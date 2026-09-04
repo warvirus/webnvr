@@ -97,6 +97,31 @@ func (s *Server) StartWithHandler(h http.Handler) error {
 	return nil
 }
 
+// Broadcast는 접속 중인 모든 클라이언트에게 제어 메시지를 보낸다.
+// conns 스냅샷을 뜬 뒤 conn별 goroutine으로 전송해 느린 구독자가 RTP 펌프를 막지 않게 한다
+// (제어 메시지라 RTP 스트림과의 순서 보장은 필요 없다).
+func (s *Server) Broadcast(m ServerMsg) {
+	s.mu.Lock()
+	targets := make([]*connState, 0, len(s.conns))
+	for st := range s.conns {
+		targets = append(targets, st)
+	}
+	s.mu.Unlock()
+	for _, st := range targets {
+		go st.sendMsg(m)
+	}
+}
+
+// BroadcastCamerasChanged는 카메라 목록/설정 변경을 모든 클라이언트에 알린다. (api.changeBroadcaster)
+func (s *Server) BroadcastCamerasChanged(reason, cameraID string) {
+	s.Broadcast(ServerMsg{Type: MsgCamerasChanged, Reason: reason, CameraID: cameraID})
+}
+
+// BroadcastConfigChanged는 앱 설정 변경을 모든 클라이언트에 알린다. (api.changeBroadcaster)
+func (s *Server) BroadcastConfigChanged() {
+	s.Broadcast(ServerMsg{Type: MsgConfigChanged})
+}
+
 // Addr은 실제 바인딩된 주소다.
 func (s *Server) Addr() string {
 	s.mu.Lock()
