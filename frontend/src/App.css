@@ -734,3 +734,67 @@ input, select { font-family: inherit; }
   0%, 100% { opacity: 1; }
   50% { opacity: 0.25; }
 }
+
+/* ── 다시보기 카메라 선택 패널 (날짜별 녹화 현황) ── */
+.cam-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+.cam-pick {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  text-align: left;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.cam-pick:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.cam-pick.active {
+  border-color: var(--accent, #38b6ff);
+  background: rgba(56, 182, 255, 0.10);
+}
+.cam-pick.has-rec {
+  border-color: rgba(56, 182, 255, 0.35);
+}
+.cam-pick-ch {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--dim);
+  letter-spacing: 0.06em;
+}
+.cam-pick-name {
+  font-size: 14px;
+  font-weight: 600;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cam-pick-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent, #38b6ff);
+}
+.cam-pick-none {
+  color: var(--dim);
+}
+.cam-pick-dot {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent, #38b6ff);
+  box-shadow: 0 0 6px rgba(56, 182, 255, 0.7);
+}

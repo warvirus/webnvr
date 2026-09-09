@@ -19,6 +19,32 @@ func recordingStoreOf(app *App) *recording.Store { return app.recording.Store() 
 
 // RegisterRecordingHTTP는 /api/recordings/* 라우트를 등록한다.
 func RegisterRecordingHTTP(mux *http.ServeMux, app *App) {
+	// 전 카메라 구간 요약 (다시보기 화면의 "한눈에 보기") — /api/recordings/ 보다 긴 패턴이 우선한다
+	mux.HandleFunc("/api/recordings/overview", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET만 허용"})
+			return
+		}
+		from, to, herr := rangeParams(r)
+		if herr != nil {
+			writeErr(w, herr)
+			return
+		}
+		ovs, err := recordingStoreOf(app).Overview(from, to)
+		if err != nil {
+			writeErr(w, errInternal(err.Error()))
+			return
+		}
+		out := make([]CamOverviewDTO, 0, len(ovs))
+		for _, o := range ovs {
+			out = append(out, CamOverviewDTO{
+				CameraID: o.CameraID, Segments: o.Segments, Bytes: o.Bytes,
+				FirstMS: o.FirstMS, LastMS: o.LastMS, Events: o.Events,
+			})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"fromMs": from, "toMs": to, "cameras": out})
+	})
+
 	mux.HandleFunc("/api/recordings/status", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET만 허용"})
@@ -85,6 +111,16 @@ func rangeParams(r *http.Request) (int64, int64, *httpError) {
 		return 0, 0, errBadReq("from이 to보다 큽니다")
 	}
 	return from, to, nil
+}
+
+// CamOverviewDTO는 전 카메라 요약의 항목이다.
+type CamOverviewDTO struct {
+	CameraID string `json:"cameraId"`
+	Segments int64  `json:"segments"`
+	Bytes    int64  `json:"bytes"`
+	FirstMS  int64  `json:"firstMs"`
+	LastMS   int64  `json:"lastMs"`
+	Events   int64  `json:"events"`
 }
 
 // RecRange는 연속 녹화 구간 하나다.

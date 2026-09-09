@@ -1,10 +1,10 @@
-// 다시보기 페이지 — 카메라 선택, 날짜 네비, 타임라인 스크러버, HLS 재생 (Phase R.3)
+// 다시보기 페이지 — 날짜별 전 카메라 녹화 현황(한눈에 보기), 타임라인 스크러버, HLS 재생 (Phase R.3/R.5)
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import Hls from 'hls.js';
 import {useCameraStore} from '../store/cameraStore';
 import {useUIStore} from '../store/uiStore';
 import {IconChevronLeft, IconChevronRight, IconPlay} from '../components/common/Icons';
-import {recordings, RecordingStatus, Timeline} from '../services/recordings';
+import {CamOverview, recordings, RecordingStatus, Timeline} from '../services/recordings';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -33,6 +33,7 @@ export function PlaybackPage() {
   });
   const [tl, setTl] = useState<Timeline | null>(null);
   const [status, setStatus] = useState<RecordingStatus | null>(null);
+  const [overview, setOverview] = useState<Map<string, CamOverview>>(new Map());
   const [loading, setLoading] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -57,9 +58,27 @@ export function PlaybackPage() {
   }, [camId, dayStart, pushToast]);
 
   useEffect(() => { loadTimeline(); }, [loadTimeline]);
+
+  // 날짜별 전 카메라 녹화 현황 (한눈에 보기) — 날짜가 바뀌면 다시 조회한다
+  const loadOverview = useCallback(() => {
+    recordings.overview(dayStart, dayStart + DAY_MS)
+      .then(o => setOverview(new Map(o.cameras.map(c => [c.cameraId, c]))))
+      .catch(() => setOverview(new Map()));
+  }, [dayStart]);
+  useEffect(() => { loadOverview(); }, [loadOverview]);
+
   useEffect(() => {
     recordings.status().then(setStatus).catch(() => setStatus(null));
   }, []);
+
+  // 기본 선택: 이 날짜에 녹화가 있는 첫 카메라 (없으면 첫 카메라)
+  useEffect(() => {
+    setCamId(cur => {
+      if (cur && (overview.size === 0 || overview.has(cur))) return cur;
+      const withRec = ordered.find(c => overview.has(c.id));
+      return (withRec ?? ordered[0])?.id ?? '';
+    });
+  }, [overview, ordered]);
 
   // HLS 재생 시작 — seekTs부터 (없으면 첫 구간)
   const startPlayback = useCallback((fromTs: number) => {
@@ -110,6 +129,9 @@ export function PlaybackPage() {
   const events = tl?.events ?? [];
   const usedBytes = tl?.usedBytes ?? 0;
   const hasRecording = ranges.length > 0;
+  const totalDayBytes = useMemo(
+    () => [...overview.values()].reduce((a, c) => a + c.bytes, 0), [overview]);
+  const dayWithRec = overview.size > 0;
 
   return (
     <>
@@ -117,20 +139,12 @@ export function PlaybackPage() {
         <div className="discovery-head">
           <h3>다시보기</h3>
           <span className="discovery-hint">
-            {status ? `녹화 사용량 ${fmtBytes(status.usedBytes)} · 녹화 중 ${status.recording.length}대` : '녹화 상태 확인 중…'}
+            {fmtDay(dayStart)} 녹화 {dayWithRec ? `${overview.size}대 · ${fmtBytes(totalDayBytes)}` : '없음'}
+            {status && <> · 전체 사용량 {fmtBytes(status.usedBytes)} · 녹화 중 {status.recording.length}대</>}
           </span>
         </div>
 
         <div className="field-row" style={{alignItems: 'end'}}>
-          <div className="field">
-            <label>카메라</label>
-            <select value={camId} onChange={e => { setCamId(e.target.value); setSeekTs(null); }}>
-              {ordered.length === 0 && <option value="">카메라 없음</option>}
-              {ordered.map((c, i) => (
-                <option key={c.id} value={c.id}>{i + 1}. {c.name}</option>
-              ))}
-            </select>
-          </div>
           <div className="field">
             <label>날짜</label>
             <div style={{display: 'flex', gap: 4, alignItems: 'center'}}>
@@ -143,10 +157,33 @@ export function PlaybackPage() {
           </div>
           <div className="field" style={{flex: 1}}>
             <label>&nbsp;</label>
-            <button className="btn" disabled={!camId || loading} onClick={loadTimeline}>
+            <button className="btn" disabled={!camId || loading} onClick={() => { loadTimeline(); loadOverview(); }}>
               {loading ? '불러오는 중…' : '새로고침'}
             </button>
           </div>
+        </div>
+
+        {/* 카메라별 녹화 현황 — 이 날짜의 녹화를 한눈에 본다 */}
+        <div className="cam-picker" role="listbox" aria-label="카메라별 녹화 현황">
+          {ordered.length === 0 && <div className="empty" style={{flex: 1}}>등록된 카메라가 없습니다.</div>}
+          {ordered.map((c, i) => {
+            const ov = overview.get(c.id);
+            const active = c.id === camId;
+            return (
+              <button key={c.id} role="option" aria-selected={active}
+                className={`cam-pick ${active ? 'active' : ''} ${ov ? 'has-rec' : ''}`}
+                onClick={() => { setCamId(c.id); setSeekTs(null); }}>
+                <span className="cam-pick-ch">CH {String(i + 1).padStart(2, '0')}</span>
+                <span className="cam-pick-name">{c.name}</span>
+                <span className="cam-pick-meta">
+                  {ov
+                    ? <>{fmtTime(ov.firstMs).slice(0, 5)}~{fmtTime(ov.lastMs).slice(0, 5)} · {fmtBytes(ov.bytes)}{ov.events > 0 ? ` · 이벤트 ${ov.events}` : ''}</>
+                    : <span className="cam-pick-none">녹화 없음</span>}
+                </span>
+                {ov && <span className="cam-pick-dot" title="녹화 있음"/>}
+              </button>
+            );
+          })}
         </div>
 
         {/* 타임라인 스크러버 */}
@@ -184,7 +221,9 @@ export function PlaybackPage() {
         </div>
         {!hasRecording && (
           <div className="empty" style={{marginTop: 8}}>
-            {loading ? '타임라인을 불러오는 중…' : '이 날짜에 녹화가 없습니다.'}
+            {loading ? '타임라인을 불러오는 중…'
+              : !dayWithRec ? '이 날짜에 녹화된 카메라가 없습니다. 다른 날짜를 선택하세요.'
+              : `${ordered.find(c => c.id === camId)?.name ?? '선택된 카메라'}의 이 날짜 녹화가 없습니다.`}
           </div>
         )}
         {hasRecording && (
@@ -197,7 +236,7 @@ export function PlaybackPage() {
 
       <section className="discovery" aria-label="재생">
         <div className="discovery-head">
-          <h3>재생</h3>
+          <h3>재생{camId ? ` — ${ordered.find(c => c.id === camId)?.name ?? ''}` : ''}</h3>
           {hasRecording && (
             <button className="btn btn-primary" disabled={!camId}
               onClick={() => seek(ranges[0].fromMs)}>

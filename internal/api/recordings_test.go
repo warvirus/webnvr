@@ -111,3 +111,31 @@ func TestRecordingsTimelineAndPlaylist(t *testing.T) {
 		t.Errorf("Range status = %d, want 206", res3.StatusCode)
 	}
 }
+
+func TestRecordingsOverview(t *testing.T) {
+	app, srv := newTestAppFull(t)
+	seedRecording(t, app, "cam-rec-1", 1_000_000)
+
+	status, raw := doJSON(t, http.MethodGet, srv.URL+"/api/recordings/overview?from=0&to=9000000000000", nil)
+	if status != 200 {
+		t.Fatalf("overview status=%d", status)
+	}
+	m := raw.(map[string]any)
+	cams := m["cameras"].([]any)
+	if len(cams) != 1 {
+		t.Fatalf("cameras = %d, want 1", len(cams))
+	}
+	c := cams[0].(map[string]any)
+	if c["cameraId"] != "cam-rec-1" {
+		t.Errorf("cameraId = %v", c["cameraId"])
+	}
+	if n, _ := c["segments"].(float64); n != 2 {
+		t.Errorf("segments = %v, want 2", c["segments"])
+	}
+	if n, _ := c["events"].(float64); n != 1 {
+		t.Errorf("events = %v, want 1", c["events"])
+	}
+	if n, _ := c["bytes"].(float64); n != 2820 {
+		t.Errorf("bytes = %v, want 2820", c["bytes"])
+	}
+}

@@ -4,6 +4,7 @@ package recording
 import (
 	"database/sql"
 	"fmt"
+	"sort"
 )
 
 // Flag 비트.
@@ -147,6 +148,70 @@ func (s *Store) EventsRange(cameraID string, fromMS, toMS int64) ([]Event, error
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// CamOverview는 한 카메라의 구간 녹화 요약이다. (전 카메라 한눈에 보기)
+type CamOverview struct {
+	CameraID string
+	Segments int64
+	Bytes    int64
+	FirstMS  int64
+	LastMS   int64
+	Events   int64
+}
+
+// Overview는 [fromMS, toMS] 구간의 카메라별 녹화 요약을 반환한다.
+// 녹화가 없는 카메라는 결과에 없다.
+func (s *Store) Overview(fromMS, toMS int64) ([]CamOverview, error) {
+	rows, err := s.db.Query(
+		`SELECT camera_id, COUNT(*), COALESCE(SUM(bytes),0),
+		        MIN(start_ts), MAX(start_ts + dur_ms)
+		 FROM segments
+		 WHERE start_ts + dur_ms >= ? AND start_ts <= ?
+		 GROUP BY camera_id`, fromMS, toMS)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]*CamOverview{}
+	for rows.Next() {
+		var o CamOverview
+		if err := rows.Scan(&o.CameraID, &o.Segments, &o.Bytes, &o.FirstMS, &o.LastMS); err != nil {
+			return nil, err
+		}
+		out[o.CameraID] = &o
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// 이벤트 건수 병합
+	evRows, err := s.db.Query(
+		`SELECT camera_id, COUNT(*) FROM events WHERE ts BETWEEN ? AND ? GROUP BY camera_id`, fromMS, toMS)
+	if err != nil {
+		return nil, err
+	}
+	defer evRows.Close()
+	for evRows.Next() {
+		var camID string
+		var n int64
+		if err := evRows.Scan(&camID, &n); err != nil {
+			return nil, err
+		}
+		if o, ok := out[camID]; ok {
+			o.Events = n
+		}
+	}
+	return collectOverview(out), evRows.Err()
+}
+
+func collectOverview(m map[string]*CamOverview) []CamOverview {
+	out := make([]CamOverview, 0, len(m))
+	for _, v := range m {
+		out = append(out, *v)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CameraID < out[j].CameraID })
+	return out
 }
 
 func collect(rows *sql.Rows) ([]Segment, error) {

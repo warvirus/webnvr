@@ -72,7 +72,25 @@ export interface RecordingStatus {
   storages: StorageStatus[];
 }
 
+export interface CamOverview {
+  cameraId: string;
+  segments: number;
+  bytes: number;
+  firstMs: number;
+  lastMs: number;
+  events: number;
+}
+
+export interface Overview {
+  fromMs: number;
+  toMs: number;
+  cameras: CamOverview[];
+}
+
 export const recordings = {
+  overview: (fromMs: number, toMs: number) =>
+    request<Overview>('GET', `/api/recordings/overview?from=${fromMs}&to=${toMs}`),
+
   timeline: (cameraId: string, fromMs: number, toMs: number) =>
     request<Timeline>('GET', `/api/recordings/${cameraId}?from=${fromMs}&to=${toMs}`),
 
