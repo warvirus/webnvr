@@ -70,6 +70,7 @@ export function PlaybackPage() {
   useEffect(() => { loadOverview(); }, [loadOverview]);
 
   // 달력의 월(monthStart)이 바뀌면 그 달의 녹화일 요약을 조회한다
+  const [calOpen, setCalOpen] = useState(false); // 날짜 버튼 클릭 시에만 달력 표시
   const monthOf = useCallback((ms: number) => {
     const d = new Date(ms);
     return new Date(d.getFullYear(), d.getMonth(), 1).getTime();
@@ -100,6 +101,7 @@ export function PlaybackPage() {
   const pickDay = useCallback((ms: number) => {
     setDayStart(ms);
     setViewMonth(monthOf(ms));
+    setCalOpen(false); // 선택 완료 — 달력 닫기
   }, [monthOf]);
 
   // HLS 재생 시작 — seekTs부터 (없으면 첫 구간)
@@ -165,7 +167,7 @@ export function PlaybackPage() {
           </span>
         </div>
 
-        {/* 날짜 네비 + 달력을 나란히 배치 — 달력은 항상 펼쳐 둔다 */}
+        {/* 날짜 네비 — 달력은 날짜 버튼 클릭 시에만 열리고 나란히 표시된다 */}
         <div className="search-layout">
           <div className="search-left">
             <div className="field-row" style={{alignItems: 'end'}}>
@@ -175,8 +177,9 @@ export function PlaybackPage() {
                   <button type="button" className="btn" aria-label="이전 날"
                     onClick={() => setDayStart(d => d - DAY_MS)}>◀</button>
                   <button type="button" className="btn btn-date" aria-label="달력에서 선택"
-                    onClick={() => { setViewMonth(monthOf(dayStart)); }}>
-                    {fmtDay(dayStart)}
+                    aria-expanded={calOpen}
+                    onClick={() => { setCalOpen(o => !o); setViewMonth(monthOf(dayStart)); }}>
+                    {fmtDay(dayStart)} ▾
                   </button>
                   <button type="button" className="btn" aria-label="다음 날"
                     onClick={() => setDayStart(d => d + DAY_MS)}>▶</button>
@@ -191,6 +194,7 @@ export function PlaybackPage() {
             </div>
           </div>
 
+          {calOpen && (
           <RecCalendar
             monthStart={viewMonth}
             selectedDay={dayStart}
@@ -205,6 +209,7 @@ export function PlaybackPage() {
             })}
             onPickDay={pickDay}
           />
+          )}
         </div>
 
         {/* 카메라별 녹화 현황 — 이 날짜의 녹화를 한눈에 본다 */}
