@@ -5,6 +5,7 @@ import {create} from 'zustand';
 import {wsService} from '../services/ws';
 import {useCameraStore} from './cameraStore';
 import {consumeSelfEdit} from './selfEdits';
+import {useUIStore} from './uiStore';
 import {DecoderHub} from '../services/decoder';
 import {PacketIn} from '../types/stream';
 import {StatSample, StreamState, StreamStats} from '../types/stream';
@@ -169,8 +170,9 @@ function getHub(): DecoderHub {
           lastError: null,
         }));
       },      onNotice: (cameraId, message) => {
-        // 자가 치유 진행(포맷 전환 등) — 타일 상태는 유지하고 배너에만 표시
-        useStreamStore.setState({lastError: message});
+        // 자가 치유 진행(포맷 전환 등) — 타일 상태는 유지. 레이아웃을 밀지 않도록
+        // 하단 고정 토스트로만 알린다(그리드 위 배너 lastError는 진짜 오류 전용).
+        useUIStore.getState().pushToast('info', message);
       },
       onError: (cameraId, message) => {
         useStreamStore.setState(s => ({
