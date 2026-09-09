@@ -159,9 +159,9 @@ export function PlaybackPage() {
 
   return (
     <>
-      <section className="discovery" aria-label="다시보기">
+      <section className="discovery" aria-label="영상 검색">
         <div className="discovery-head">
-          <h3>다시보기</h3>
+          <h3>영상 검색</h3>
           <span className="discovery-hint">
             {fmtDay(dayStart)} 녹화 {dayWithRec ? `${overview.size}대 · ${fmtBytes(totalDayBytes)}` : '없음'}
             {status && <> · 전체 사용량 {fmtBytes(status.usedBytes)} · 녹화 중 {status.recording.length}대</>}

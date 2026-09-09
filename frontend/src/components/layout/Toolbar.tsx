@@ -78,6 +78,7 @@ export function Toolbar() {
 
   const titles: Record<string, {eyebrow: string; title: string}> = {
     monitoring: {eyebrow: 'Live Grid', title: '모니터링'},
+    playback: {eyebrow: 'Recording Search', title: '영상 검색'},
     management: {eyebrow: 'Camera Registry', title: '카메라 관리'},
     settings: {eyebrow: 'Preferences', title: '설정'},
   };
