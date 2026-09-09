@@ -40,16 +40,17 @@ export interface SessionStats {
 // 디코더 청크 포맷 후보 (실측 기준 — F8/F12):
 // ANNEXB : description 없음 + 시작코드 청크 — 사용자 WebKit(메인 스레드)에서 동작 확인
 // AVCC   : description=avcC + 길이 접두어 청크 — Annex B 실패 환경용 폴백
-// 성공한 포맷은 모듈 레벨에서 기억해 재접속 시 처음부터 사용한다.
+// 성공한 포맷은 카메라별로 기억해 재접속 시 처음부터 사용한다. (카메라 간 공유 금지 —
+// 한 카메라의 사건이 다른 카메라 시작 포맷을 바꾸면 포맷 불일치 스톨→전환 알림이 도린다)
 const FORMAT_ANNEXB = 0;
 const FORMAT_AVCC = 1;
 const FORMAT_COUNT = 2;
-let lastGoodFormat: number | null = null;
+const lastGoodFormatByCam = new Map<string, number>();
 
 const TICK_MS = 30;          // 큐 처리 주기 (지터 스무딩)
 const MAX_QUEUE = 1200;      // 큐 상한 (버스트 흡수)
 const STATS_MS = 1000;
-const STALL_MS = 4_000;      // 키프레임 후 무출력 시 포맷 전환 대기
+const STALL_MS = 4_000;      // 출력 정체 확인 대기
 const STALL_GIVEUP_MS = 12_000; // 모든 포맷 시도 후 포기
 
 const START_CODE = new Uint8Array([0, 0, 0, 1]);
@@ -154,7 +155,7 @@ export class Session {
   cameraId: string;
   config: CodecConfigIn | null = null;
   decoder: VideoDecoder | null = null;
-  formatIdx = lastGoodFormat ?? FORMAT_ANNEXB; // 마지막 성공 포맷 우선 (기본: Annex B)
+  formatIdx: number; // 시작 포맷 = 이 카메라의 마지막 성공 포맷 (기본: Annex B)
   sawKeyframe = false;
 
   queue: PacketIn[] = [];
@@ -174,11 +175,17 @@ export class Session {
 
   // 진단
   packets = 0;
-  frames = 0;
+  frames = 0;         // 디코더에 제출한 청크 수
+  outputs = 0;        // output 콜백으로 실제 출력된 프레임 수 (정체 감시 기준)
+  submittedKey = false; // 현재 포맷으로 키프레임 청크를 제출했는가 (스톨 판정 전제)
+  formatRecorded = false; // 이 세션에서 실제 출력이 나와 포맷을 기록했는가
   drops = 0;
   diagSent = false;
   firstPacketMs = 0;
   firstKeyMs = 0;
+  // 포맷 전환 알림 스팸 방지 — 카메라당 1회 (전환 자체는 계속 시도)
+  formatNoticeSent = false;
+  lastOutputMs = 0;
   lastError = '';
 
   // 통계
@@ -192,6 +199,7 @@ export class Session {
   constructor(cameraId: string, ev: SessionEvents) {
     this.cameraId = cameraId;
     this.ev = ev;
+    this.formatIdx = lastGoodFormatByCam.get(cameraId) ?? FORMAT_ANNEXB;
   }
 
   // paramSets는 유효한 파라미터 셋을 반환한다.
@@ -256,6 +264,14 @@ export class Session {
         const dec = new VideoDecoder({
           output: (frame: VideoFrame) => {
             // console.log('🎬 프레임 렌더링', {camera: this.cameraId, resolution: `${frame.displayWidth}x${frame.displayHeight}`});
+            this.outputs++;
+            this.lastOutputMs = performance.now();
+            if (!this.formatRecorded) {
+              // 실제 출력이 나온 포맷만 기록한다(제출 기준이 아님) — 카메라별 기억.
+              this.formatRecorded = true;
+              lastGoodFormatByCam.set(this.cameraId, this.formatIdx);
+              this.ev.onDecoded(this.cameraId); // 첫 실제 출력 = 디코딩 성공
+            }
             this.ev.onFrame(this.cameraId, frame);
           },
           error: (e: DOMException) => {
@@ -297,7 +313,9 @@ export class Session {
     this.decoder = null;
     this.sawKeyframe = false; // 새 포맷에서 키프레임부터 다시 시작
     this.firstKeyMs = 0;
-    this.heldKey = null;
+    // heldKey는 유지한다 — 폐기하면 다음 IDR(GOP 수 초)까지 암전이고,
+    // 그 사이 watchdog가 또 스톨로 오판해 알림이 반복된다. 보관 키프레임을
+    // 새 포맷으로 다시 디코딩하면 즉시 복구된다.
     return true;
   }
 
@@ -329,19 +347,49 @@ export class Session {
     this.watchdog();
   }
 
-  // watchdog는 정체 상태를 감시하고 포맷 전환/오류 보고를 수행한다.
+  // watchdog는 출력 정체를 감시하고 포맷 전환/오류 보고를 수행한다.
+  // 감시 기준은 "디코더에 제출한 청크 수"가 아니라 "VideoDecoder.output이 실제
+  // 내보낸 프레임 수(outputFrames)"다 — 제출은 성공해도 출력이 안 나오는
+  // 환경(포맷 불일치)이 문제의 본체이고, 제출 카운터로는 그 상태를 볼 수 없었다.
   private watchdog() {
-    if (this.frames > 0) return; // 정상 출력 중
     if (this.firstPacketMs === 0) this.firstPacketMs = performance.now();
     if (this.sawKeyframe && this.firstKeyMs === 0) this.firstKeyMs = performance.now();
     if (this.packets < 10) return;
     const now = performance.now();
 
-    // 키프레임 이후 무출력 → 다른 청크 포맷으로 전환 (Safari avcC 필수 이슈 대응)
+    // ① 출력이 한 번이라도 나온 뒤 정체 — 포맷 문제가 아니라 스트림/네트워크 문제.
+    //    포맷 전환하지 않고 조용히 둔다(타일 stats가 정지로 보여줌).
+    if (this.outputs > 0) {
+      if (this.lastOutputMs > 0 && now - this.lastOutputMs > STALL_GIVEUP_MS) {
+        if (!this.diagSent) {
+          this.diagSent = true;
+          this.ev.onError(this.cameraId, `출력이 ${Math.round((now - this.lastOutputMs) / 1000)}초간 멈췄습니다 — 스트림 연결을 확인하세요`);
+        }
+      }
+      return;
+    }
+
+    // ② 출력이 전혀 없는 상태 — 포맷 불일치 후보.
+    //    판정은 "제출된 키프레임 청크" 기준으로만 한다. SPS 지연 등으로 키프레임이
+    //    아직 제출되지 않은 세션(hold 상태)은 결함이 아니므로 건드리지 않는다 —
+    //    이 가드가 없어 세션 시작 직후마다 알림이 터졌다.
+    if (!this.submittedKey) {
+      // 키프레임은 왔지만 디코더 준비가 계속 실패(SPS/PPS 부재 등) — 진단만 1회.
+      if (!this.diagSent && this.sawKeyframe && now - this.firstKeyMs > STALL_GIVEUP_MS) {
+        this.diagSent = true;
+        this.ev.onError(this.cameraId, '키프레임을 받았지만 디코더를 준비하지 못했습니다 — SPS/PPS 수신 상태를 확인하세요');
+      }
+      return;
+    }
+
     if (this.sawKeyframe && now - this.firstKeyMs > STALL_MS) {
-      console.warn('⚠️ 키프레임 후 무출력 감지, 포맷 전환', {camera: this.cameraId, packets: this.packets, elapsed: Math.round(now - this.firstKeyMs)});
       if (this.advanceFormat()) {
-        this.ev.onNotice(this.cameraId, `디코딩 출력이 없어 청크 포맷을 전환했습니다 (${this.formatIdx === FORMAT_ANNEXB ? 'Annex B' : 'AVCC'})`);
+        console.warn('⚠️ 출력 없음 — 청크 포맷 전환', {camera: this.cameraId, format: this.formatIdx === FORMAT_ANNEXB ? 'Annex B' : 'AVCC', packets: this.packets});
+        // 알림은 카메라당 1회만 — 세션이 자주 재시작돼도 토스트 폭풍이 나지 않게.
+        if (!this.formatNoticeSent) {
+          this.formatNoticeSent = true;
+          this.ev.onNotice(this.cameraId, `디코딩 출력이 없어 청크 포맷을 전환했습니다 (${this.formatIdx === FORMAT_ANNEXB ? 'Annex B' : 'AVCC'})`);
+        }
         return;
       }
       if (!this.diagSent && now - this.firstKeyMs > STALL_GIVEUP_MS) {
@@ -351,7 +399,7 @@ export class Session {
       return;
     }
 
-    // 키프레임 자체가 안 오는 경우 (모든 포맷과 무관 — 카메라 GOP 확인 필요)
+    // ③ 키프레임 자체가 안 오는 경우 (모든 포맷과 무관 — 카메라 GOP 확인 필요)
     if (!this.sawKeyframe && now - this.firstPacketMs > 20_000) {
       if (!this.diagSent) {
         console.error('❌ 키프레임 미수신 타임아웃', {camera: this.cameraId, packets: this.packets, elapsed: Math.round(now - this.firstPacketMs)});
@@ -450,19 +498,14 @@ export class Session {
       data,
     });
     this.frames++;
-    if (this.frames === 1) {
-      // 첫 프레임 디코딩 시도 성공 → 성공 포맷을 기억해(재접속 시 우선 사용)
-      // UI의 오류/대기 상태를 해제한다
-      // console.log('✅ 첫 프레임 디코딩 시도', {camera: this.cameraId, format: this.formatIdx === 0 ? 'Annex B' : 'AVCC'});
-      lastGoodFormat = this.formatIdx;
-      this.ev.onDecoded(this.cameraId);
-    }
+    if (isKey) this.submittedKey = true; // 스톨 판정 전제 — 제출된 키프레임만 판정 대상
     try {
       this.decoder.decode(chunk);
     } catch (e) {
       // 디코더 상태 이상 → 포맷 전환 후 다음 키프레임에서 재시작
       console.error('❌ 디코딩 실패', {camera: this.cameraId, error: String(e)});
       this.lastError = `디코딩 실패: ${String(e)}`;
+      this.submittedKey = false; // 제출 실패 — 다음 키프레임에서 다시 판정
       this.advanceFormat();
       this.drops++;
     }
@@ -568,7 +611,8 @@ export class Session {
     return [];
   }
 
-  // stats는 1초 주기로 통계를 산출한다.
+  // stats는 1초 주기로 통계를 산출한다. fps는 실제 "출력된" 프레임 기준 —
+  // 제출 기준이면 디코더가 죽어도 fps가 나와 정상처럼 보였다.
   stats(): SessionStats | null {
     const now = performance.now();
     if (this.lastStats === 0) {
@@ -577,10 +621,10 @@ export class Session {
     }
     const dt = (now - this.lastStats) / 1000;
     if (dt < STATS_MS / 1000) return null;
-    const fps = (this.frames - this.lastFrames) / dt;
+    const fps = (this.outputs - this.lastFrames) / dt;
     const kbps = ((this.bytes - this.lastBytes) * 8) / 1000 / dt;
     this.lastStats = now;
-    this.lastFrames = this.frames;
+    this.lastFrames = this.outputs;
     this.lastBytes = this.bytes;
     return {fps: Math.round(fps * 10) / 10, kbps: Math.round(kbps), packets: this.packets, drops: this.drops};
   }
