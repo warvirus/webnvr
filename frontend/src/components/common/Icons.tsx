@@ -67,6 +67,7 @@ export const IconFull = svg(<>
 </>);
 
 export const IconPlay = svg(<><path d="M7 4.5v15l13-7.5-13-7.5Z"/></>);
+export const IconRewind = svg(<><path d="M3 5v14"/><path d="m21 5-10 7 10 7V5Z"/></>);
 
 export const IconStop = svg(<><rect x="6" y="6" width="12" height="12" rx="1.5"/></>);
 

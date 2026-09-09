@@ -632,3 +632,74 @@ input, select { font-family: inherit; }
   color: var(--amber);
   font-family: var(--font-mono);
 }
+
+/* ── 다시보기 (Phase R.3) ── */
+.tl-wrap {
+  position: relative;
+  margin-top: 12px;
+  user-select: none;
+}
+.tl-track {
+  position: relative;
+  height: 34px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+}
+.tl-range {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(180deg, rgba(56, 182, 255, 0.55), rgba(56, 182, 255, 0.30));
+  border-left: 1px solid rgba(56, 182, 255, 0.8);
+  border-right: 1px solid rgba(56, 182, 255, 0.8);
+}
+.tl-range:hover {
+  background: linear-gradient(180deg, rgba(56, 182, 255, 0.75), rgba(56, 182, 255, 0.45));
+}
+.tl-event {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--rec, #ff5a5a);
+  box-shadow: 0 0 6px rgba(255, 90, 90, 0.8);
+}
+.tl-axis {
+  position: relative;
+  height: 18px;
+  margin-top: 2px;
+}
+.tl-tick {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 10px;
+  color: var(--dim);
+  font-family: var(--font-mono);
+}
+.tl-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--dim);
+}
+.play-video-box {
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+  min-height: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.play-video {
+  width: 100%;
+  max-height: 60vh;
+  background: #000;
+  outline: none;
+}
+.meta-tag.rec {
+  color: var(--rec, #ff5a5a);
+  border-color: rgba(255, 90, 90, 0.5);
+}

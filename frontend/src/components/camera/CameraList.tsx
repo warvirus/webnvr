@@ -18,10 +18,17 @@ import {
   sortableKeyboardCoordinates,
 } from '@dnd-kit/sortable';
 import {CSS} from '@dnd-kit/utilities';
-import {CameraDTO} from '../../types/api';
+import {CameraDTO, RecordMode} from '../../types/api';
 import {selectOrderedCameras, useCameraStore} from '../../store/cameraStore';
 import {useUIStore} from '../../store/uiStore';
 import {IconCamera, IconEdit, IconGrip, IconTrash} from '../common/Icons';
+
+const RECORD_MODE_LABEL: Record<RecordMode, string> = {
+  off: '녹화 끔',
+  continuous: '상시 녹화',
+  event: '이벤트 녹화',
+  both: '상시+이벤트',
+};
 
 // CameraList는 OSD 리티클 카드 그리드다.
 export function CameraList() {
@@ -130,6 +137,9 @@ function CameraCard({camera, channel, dimmed}: {camera: CameraDTO; channel: numb
         <span className="meta-tag">{camera.streamConfig?.transport?.toUpperCase() ?? 'TCP'}</span>
         {camera.hasPassword && <span className="meta-tag">인증 저장됨</span>}
         {camera.groupId && <span className="meta-tag">#{camera.groupId}</span>}
+        {camera.recordMode && camera.recordMode !== 'off' && (
+          <span className="meta-tag rec">{RECORD_MODE_LABEL[camera.recordMode] ?? camera.recordMode}</span>
+        )}
       </div>
 
       <div className="osd-actions">

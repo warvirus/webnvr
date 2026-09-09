@@ -1,6 +1,6 @@
-// 카메라 추가/수정 폼 — 타입별 필드 동적 표시와 유효성 검증
+// 카메라 추가/수정 폼 — 타입별 필드 동적 표시와 유효성 검증 (+녹화 모드, Phase R.5)
 import React, {useMemo, useState} from 'react';
-import {CameraDTO, TestDirectStreamRequest, TestONVIFRequest} from '../../types/api';
+import {CameraDTO, RecordMode, TestDirectStreamRequest, TestONVIFRequest} from '../../types/api';
 import {ConnectionTest, TestState} from './ConnectionTest';
 import {ProfileSelector} from './ProfileSelector';
 import {useCameraStore} from '../../store/cameraStore';
@@ -16,6 +16,9 @@ export interface CameraFormValue {
   ptzSupported: boolean;
   groupId: string;
   transport: string;
+  recordMode: RecordMode;
+  preRoll: number;
+  postRoll: number;
 }
 
 interface Props {
@@ -51,6 +54,9 @@ export function CameraForm({mode, cameraId, initial, presetXAddr, onSubmit, onCa
     ptzSupported: initial?.ptzSupported ?? false,
     groupId: initial?.groupId ?? '',
     transport: initial?.streamConfig?.transport ?? 'tcp',
+    recordMode: initial?.recordMode ?? 'off',
+    preRoll: initial?.preRollSeconds ?? 10,
+    postRoll: initial?.postRollSeconds ?? 15,
   });
   const [errors, setErrors] = useState<string[]>([]);
   const [test, setTest] = useState<TestState>({kind: 'idle'});
@@ -219,6 +225,33 @@ export function CameraForm({mode, cameraId, initial, presetXAddr, onSubmit, onCa
           <input type="text" value={value.groupId} placeholder="예: entrance"
             onChange={e => set({groupId: e.target.value})}/>
         </div>
+      </div>
+
+      <div className="field-row">
+        <div className="field">
+          <label>녹화 모드</label>
+          <select value={value.recordMode} onChange={e => set({recordMode: e.target.value as RecordMode})}>
+            <option value="off">끔</option>
+            <option value="continuous">상시 (24/7)</option>
+            <option value="event">이벤트 (트리거 시에만)</option>
+            <option value="both">상시 + 이벤트</option>
+          </select>
+          <div className="hint">전역 녹화 사용이 켜져 있어야 실제 저장됩니다. 모드 변경은 즉시 반영됩니다.</div>
+        </div>
+        {value.recordMode === 'event' || value.recordMode === 'both' ? (
+          <>
+            <div className="field">
+              <label>사전 녹화 (초)</label>
+              <input type="text" value={value.preRoll}
+                onChange={e => set({preRoll: Math.max(1, Number(e.target.value) || 1)})}/>
+            </div>
+            <div className="field">
+              <label>사후 녹화 (초)</label>
+              <input type="text" value={value.postRoll}
+                onChange={e => set({postRoll: Math.max(1, Number(e.target.value) || 1)})}/>
+            </div>
+          </>
+        ) : null}
       </div>
 
       <ConnectionTest state={test} onRetry={runTest}/>

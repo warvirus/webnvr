@@ -8,6 +8,7 @@ import {ReconnectingOverlay} from './components/common/ReconnectingOverlay';
 import {CameraManagementPage} from './pages/CameraManagementPage';
 import {SettingsPage} from './pages/SettingsPage';
 import {MonitoringPage} from './pages/MonitoringPage';
+import {PlaybackPage} from './pages/PlaybackPage';
 import {useUIStore} from './store/uiStore';
 import {useStreamStore} from './store/streamStore';
 import {useCameraStore} from './store/cameraStore';
@@ -52,6 +53,7 @@ export default function App() {
       <Toolbar/>
       <main className="main">
         {currentPage === 'monitoring' && <MonitoringPage/>}
+        {currentPage === 'playback' && <PlaybackPage/>}
         {currentPage === 'management' && <CameraManagementPage/>}
         {currentPage === 'settings' && <SettingsPage/>}
       </main>

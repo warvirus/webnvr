@@ -1,9 +1,10 @@
 // 좌측 네비게이션 레일
-import {IconCamera, IconGrid, IconSettings} from '../common/Icons';
+import {IconCamera, IconGrid, IconRewind, IconSettings} from '../common/Icons';
 import {Page, useUIStore} from '../../store/uiStore';
 
 const NAV: {page: Page; label: string; icon: React.ReactNode}[] = [
   {page: 'monitoring', label: '모니터링', icon: <IconGrid size={18}/>},
+  {page: 'playback', label: '다시보기', icon: <IconRewind size={18}/>},
   {page: 'management', label: '카메라 관리', icon: <IconCamera size={18}/>},
   {page: 'settings', label: '설정', icon: <IconSettings size={18}/>},
 ];

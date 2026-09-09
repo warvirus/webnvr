@@ -2,6 +2,8 @@
 
 export type CameraType = 'onvif' | 'rtsp' | 'rtp' | 'rtmp';
 
+export type RecordMode = 'off' | 'continuous' | 'event' | 'both';
+
 export interface StreamConfig {
   transport: string; // 'tcp' | 'udp'
   protocol: string;  // 'rtsp' | 'rtp' | 'rtmp'
@@ -22,6 +24,9 @@ export interface CameraDTO {
   groupId: string;
   layoutOrder: number;
   enabled: boolean;
+  recordMode: RecordMode;
+  preRollSeconds: number;
+  postRollSeconds: number;
   addedAt: string;
   updatedAt: string;
 }
@@ -37,6 +42,9 @@ export interface CreateCameraRequest {
   streamConfig?: StreamConfig;
   ptzSupported: boolean;
   groupId: string;
+  recordMode?: RecordMode;
+  preRollSeconds?: number;
+  postRollSeconds?: number;
 }
 
 export interface UpdateCameraRequest {
@@ -50,6 +58,9 @@ export interface UpdateCameraRequest {
   ptzSupported?: boolean;
   groupId?: string;
   enabled?: boolean;
+  recordMode?: RecordMode;
+  preRollSeconds?: number;
+  postRollSeconds?: number;
 }
 
 export interface DiscoveredCamera {
@@ -114,6 +125,24 @@ export interface HealthResponse {
 
 // ── 설정/보안/백업 (doc 5.6) ──
 
+export interface StorageConfig {
+  path: string;
+  min_free_percent: number;
+}
+
+export interface RecordingConfig {
+  enabled: boolean;
+  max_usage_gb: number;
+  reclaim_percent: number;
+  retention_days: number;
+  keep_min_hours: number;
+  reconcile_hours: number;
+  storages: StorageConfig[];
+  segment_seconds: number;
+  segment_max_mb: number;
+  transcode: {enabled: boolean; target_codec: string; ffmpeg_path: string};
+}
+
 export interface AppConfig {
   version: number;
   server: {ws_port: number; http_port: number; max_clients: number};
@@ -130,6 +159,7 @@ export interface AppConfig {
   };
   decoder: {prefer_hardware: boolean; max_threads: number};
   logging: {level: string; file: string; max_size_mb: number; max_backups: number};
+  recording: RecordingConfig;
 }
 
 export interface SecurityInfo {

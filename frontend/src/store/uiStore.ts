@@ -2,7 +2,7 @@
 import {create} from 'zustand';
 import {GridMode} from '../types';
 
-export type Page = 'monitoring' | 'management' | 'settings';
+export type Page = 'monitoring' | 'playback' | 'management' | 'settings';
 
 export interface Toast {
   id: number;

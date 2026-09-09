@@ -33,6 +33,9 @@ export function CameraModal({mode, camera, presetXAddr}: Props) {
         },
         ptzSupported: v.type === 'onvif' ? v.ptzSupported : false,
         groupId: v.groupId.trim(),
+        recordMode: v.recordMode,
+        preRollSeconds: v.preRoll,
+        postRollSeconds: v.postRoll,
       });
       if (saved) pushToast('ok', `카메라가 등록되었습니다 — ${saved.name}`);
     } else if (camera) {
@@ -48,6 +51,9 @@ export function CameraModal({mode, camera, presetXAddr}: Props) {
         },
         ptzSupported: v.type === 'onvif' ? v.ptzSupported : false,
         groupId: v.groupId.trim(),
+        recordMode: v.recordMode,
+        preRollSeconds: v.preRoll,
+        postRollSeconds: v.postRoll,
       };
       if (v.password) req.password = v.password; // 입력한 경우에만 변경
       if (v.type === 'onvif' && v.profileToken) req.profileToken = v.profileToken;
