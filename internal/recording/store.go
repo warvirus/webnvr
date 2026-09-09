@@ -152,19 +152,20 @@ func (s *Store) EventsRange(cameraID string, fromMS, toMS int64) ([]Event, error
 
 // CamOverview는 한 카메라의 구간 녹화 요약이다. (전 카메라 한눈에 보기)
 type CamOverview struct {
-	CameraID string
-	Segments int64
-	Bytes    int64
-	FirstMS  int64
-	LastMS   int64
-	Events   int64
+	CameraID   string
+	Segments   int64
+	Bytes      int64
+	TotalDurMS int64 // 실제 녹화 시간(공백 제외) — 세그먼트 dur_ms 합
+	FirstMS    int64
+	LastMS     int64
+	Events     int64
 }
 
 // Overview는 [fromMS, toMS] 구간의 카메라별 녹화 요약을 반환한다.
 // 녹화가 없는 카메라는 결과에 없다.
 func (s *Store) Overview(fromMS, toMS int64) ([]CamOverview, error) {
 	rows, err := s.db.Query(
-		`SELECT camera_id, COUNT(*), COALESCE(SUM(bytes),0),
+		`SELECT camera_id, COUNT(*), COALESCE(SUM(bytes),0), COALESCE(SUM(dur_ms),0),
 		        MIN(start_ts), MAX(start_ts + dur_ms)
 		 FROM segments
 		 WHERE start_ts + dur_ms >= ? AND start_ts <= ?
@@ -176,7 +177,7 @@ func (s *Store) Overview(fromMS, toMS int64) ([]CamOverview, error) {
 	out := map[string]*CamOverview{}
 	for rows.Next() {
 		var o CamOverview
-		if err := rows.Scan(&o.CameraID, &o.Segments, &o.Bytes, &o.FirstMS, &o.LastMS); err != nil {
+		if err := rows.Scan(&o.CameraID, &o.Segments, &o.Bytes, &o.TotalDurMS, &o.FirstMS, &o.LastMS); err != nil {
 			return nil, err
 		}
 		out[o.CameraID] = &o

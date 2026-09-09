@@ -138,6 +138,10 @@ func TestRecordingsOverview(t *testing.T) {
 	if n, _ := c["bytes"].(float64); n != 2820 {
 		t.Errorf("bytes = %v, want 2820", c["bytes"])
 	}
+	// dur: 10초 + 10초 = 20초
+	if n, _ := c["totalDurMs"].(float64); n != 20_000 {
+		t.Errorf("totalDurMs = %v, want 20000", c["totalDurMs"])
+	}
 }
 
 func TestRecordingsDays(t *testing.T) {

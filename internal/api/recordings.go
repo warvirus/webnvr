@@ -39,7 +39,7 @@ func RegisterRecordingHTTP(mux *http.ServeMux, app *App) {
 		for _, o := range ovs {
 			out = append(out, CamOverviewDTO{
 				CameraID: o.CameraID, Segments: o.Segments, Bytes: o.Bytes,
-				FirstMS: o.FirstMS, LastMS: o.LastMS, Events: o.Events,
+				TotalDurMS: o.TotalDurMS, FirstMS: o.FirstMS, LastMS: o.LastMS, Events: o.Events,
 			})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"fromMs": from, "toMs": to, "cameras": out})
@@ -138,12 +138,13 @@ func rangeParams(r *http.Request) (int64, int64, *httpError) {
 
 // CamOverviewDTO는 전 카메라 요약의 항목이다.
 type CamOverviewDTO struct {
-	CameraID string `json:"cameraId"`
-	Segments int64  `json:"segments"`
-	Bytes    int64  `json:"bytes"`
-	FirstMS  int64  `json:"firstMs"`
-	LastMS   int64  `json:"lastMs"`
-	Events   int64  `json:"events"`
+	CameraID   string `json:"cameraId"`
+	Segments   int64  `json:"segments"`
+	Bytes      int64  `json:"bytes"`
+	TotalDurMS int64  `json:"totalDurMs"` // 실제 녹화 시간(공백 제외)
+	FirstMS    int64  `json:"firstMs"`
+	LastMS     int64  `json:"lastMs"`
+	Events     int64  `json:"events"`
 }
 
 // DayCountDTO는 달력 표시용 하루 요약이다.

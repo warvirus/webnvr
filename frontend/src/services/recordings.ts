@@ -81,6 +81,7 @@ export interface CamOverview {
   cameraId: string;
   segments: number;
   bytes: number;
+  totalDurMs: number; // 실제 녹화 시간(공백 제외)
   firstMs: number;
   lastMs: number;
   events: number;
