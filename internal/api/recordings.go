@@ -45,6 +45,29 @@ func RegisterRecordingHTTP(mux *http.ServeMux, app *App) {
 		writeJSON(w, http.StatusOK, map[string]any{"fromMs": from, "toMs": to, "cameras": out})
 	})
 
+	// 날짜별 녹화 요약 (달력의 녹화일 표시)
+	mux.HandleFunc("/api/recordings/days", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET만 허용"})
+			return
+		}
+		from, to, herr := rangeParams(r)
+		if herr != nil {
+			writeErr(w, herr)
+			return
+		}
+		days, err := recordingStoreOf(app).DayCounts(from, to)
+		if err != nil {
+			writeErr(w, errInternal(err.Error()))
+			return
+		}
+		out := make([]DayCountDTO, 0, len(days))
+		for _, d := range days {
+			out = append(out, DayCountDTO{Day: d.Day, Segments: d.Segments, Bytes: d.Bytes, Cameras: d.Cameras})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"fromMs": from, "toMs": to, "days": out})
+	})
+
 	mux.HandleFunc("/api/recordings/status", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET만 허용"})
@@ -121,6 +144,14 @@ type CamOverviewDTO struct {
 	FirstMS  int64  `json:"firstMs"`
 	LastMS   int64  `json:"lastMs"`
 	Events   int64  `json:"events"`
+}
+
+// DayCountDTO는 달력 표시용 하루 요약이다.
+type DayCountDTO struct {
+	Day      string `json:"day"` // YYYY-MM-DD (서버 로컬)
+	Segments int64  `json:"segments"`
+	Bytes    int64  `json:"bytes"`
+	Cameras  int64  `json:"cameras"`
 }
 
 // RecRange는 연속 녹화 구간 하나다.

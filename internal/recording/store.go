@@ -205,6 +205,38 @@ func (s *Store) Overview(fromMS, toMS int64) ([]CamOverview, error) {
 	return collectOverview(out), evRows.Err()
 }
 
+// DayCount는 하루 단위 녹화 요약이다. (달력 표시용 — day는 서버 로컬 기준 YYYY-MM-DD)
+type DayCount struct {
+	Day      string
+	Segments int64
+	Bytes    int64
+	Cameras  int64
+}
+
+// DayCounts는 [fromMS, toMS] 구간의 날짜별 녹화 요약을 반환한다. 녹화가 없는 날은 결과에 없다.
+// 세그먼트는 시작 시각의 날짜로 귀속된다(자정 걸침 세그먼트는 시작일에만 계수).
+func (s *Store) DayCounts(fromMS, toMS int64) ([]DayCount, error) {
+	rows, err := s.db.Query(
+		`SELECT date(start_ts/1000, 'unixepoch', 'localtime') AS day,
+		        COUNT(*), COALESCE(SUM(bytes),0), COUNT(DISTINCT camera_id)
+		 FROM segments
+		 WHERE start_ts + dur_ms >= ? AND start_ts <= ?
+		 GROUP BY day ORDER BY day`, fromMS, toMS)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DayCount
+	for rows.Next() {
+		var d DayCount
+		if err := rows.Scan(&d.Day, &d.Segments, &d.Bytes, &d.Cameras); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 func collectOverview(m map[string]*CamOverview) []CamOverview {
 	out := make([]CamOverview, 0, len(m))
 	for _, v := range m {

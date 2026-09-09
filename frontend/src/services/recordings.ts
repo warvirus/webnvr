@@ -87,7 +87,17 @@ export interface Overview {
   cameras: CamOverview[];
 }
 
+export interface DayCount {
+  day: string; // YYYY-MM-DD (서버 로컬)
+  segments: number;
+  bytes: number;
+  cameras: number;
+}
+
 export const recordings = {
+  dayCounts: (fromMs: number, toMs: number) =>
+    request<{fromMs: number; toMs: number; days: DayCount[]}>('GET', `/api/recordings/days?from=${fromMs}&to=${toMs}`),
+
   overview: (fromMs: number, toMs: number) =>
     request<Overview>('GET', `/api/recordings/overview?from=${fromMs}&to=${toMs}`),
 

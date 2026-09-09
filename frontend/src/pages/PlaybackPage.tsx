@@ -1,10 +1,11 @@
-// 다시보기 페이지 — 날짜별 전 카메라 녹화 현황(한눈에 보기), 타임라인 스크러버, HLS 재생 (Phase R.3/R.5)
+// 다시보기 페이지 — 녹화 달력, 날짜별 전 카메라 현황, 타임라인 스크러버, HLS 재생 (Phase R.3/R.5)
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import Hls from 'hls.js';
 import {useCameraStore} from '../store/cameraStore';
 import {useUIStore} from '../store/uiStore';
-import {IconChevronLeft, IconChevronRight, IconPlay} from '../components/common/Icons';
-import {CamOverview, recordings, RecordingStatus, Timeline} from '../services/recordings';
+import {IconPlay} from '../components/common/Icons';
+import {RecCalendar} from '../components/playback/RecCalendar';
+import {CamOverview, DayCount, recordings, RecordingStatus, Timeline} from '../services/recordings';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -34,6 +35,7 @@ export function PlaybackPage() {
   const [tl, setTl] = useState<Timeline | null>(null);
   const [status, setStatus] = useState<RecordingStatus | null>(null);
   const [overview, setOverview] = useState<Map<string, CamOverview>>(new Map());
+  const [dayCounts, setDayCounts] = useState<Map<string, DayCount>>(new Map());
   const [loading, setLoading] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -67,6 +69,22 @@ export function PlaybackPage() {
   }, [dayStart]);
   useEffect(() => { loadOverview(); }, [loadOverview]);
 
+  // 달력의 월(monthStart)이 바뀌면 그 달의 녹화일 요약을 조회한다
+  const [calOpen, setCalOpen] = useState(false);
+  const monthOf = useCallback((ms: number) => {
+    const d = new Date(ms);
+    return new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+  }, []);
+  const [viewMonth, setViewMonth] = useState<number>(() => monthOf(Date.now()));
+  useEffect(() => { setViewMonth(monthOf(Date.now())); }, []); // 마운트 시 현재 달
+  useEffect(() => {
+    const d = new Date(viewMonth);
+    const daysInMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    recordings.dayCounts(viewMonth, viewMonth + daysInMonth * DAY_MS)
+      .then(r => setDayCounts(new Map(r.days.map(x => [x.day, x]))))
+      .catch(() => setDayCounts(new Map()));
+  }, [viewMonth]);
+
   useEffect(() => {
     recordings.status().then(setStatus).catch(() => setStatus(null));
   }, []);
@@ -79,6 +97,12 @@ export function PlaybackPage() {
       return (withRec ?? ordered[0])?.id ?? '';
     });
   }, [overview, ordered]);
+
+  const pickDay = useCallback((ms: number) => {
+    setDayStart(ms);
+    setViewMonth(monthOf(ms));
+    setCalOpen(false);
+  }, [monthOf]);
 
   // HLS 재생 시작 — seekTs부터 (없으면 첫 구간)
   const startPlayback = useCallback((fromTs: number) => {
@@ -149,10 +173,14 @@ export function PlaybackPage() {
             <label>날짜</label>
             <div style={{display: 'flex', gap: 4, alignItems: 'center'}}>
               <button type="button" className="btn" aria-label="이전 날"
-                onClick={() => setDayStart(d => d - DAY_MS)}><IconChevronLeft size={14}/></button>
-              <span className="mono" style={{minWidth: 90, textAlign: 'center'}}>{fmtDay(dayStart)}</span>
+                onClick={() => setDayStart(d => d - DAY_MS)}>◀</button>
+              <button type="button" className="btn btn-date" aria-label="달력 열기"
+                aria-expanded={calOpen}
+                onClick={() => { setCalOpen(o => !o); setViewMonth(monthOf(dayStart)); }}>
+                {fmtDay(dayStart)} ▾
+              </button>
               <button type="button" className="btn" aria-label="다음 날"
-                onClick={() => setDayStart(d => d + DAY_MS)}><IconChevronRight size={14}/></button>
+                onClick={() => setDayStart(d => d + DAY_MS)}>▶</button>
             </div>
           </div>
           <div className="field" style={{flex: 1}}>
@@ -162,6 +190,24 @@ export function PlaybackPage() {
             </button>
           </div>
         </div>
+
+        {/* 달력 — 녹화된 날짜를 표시하고 클릭으로 선택한다 */}
+        {calOpen && (
+          <RecCalendar
+            monthStart={viewMonth}
+            selectedDay={dayStart}
+            days={dayCounts}
+            onPrevMonth={() => setViewMonth(m => {
+              const d = new Date(m);
+              return new Date(d.getFullYear(), d.getMonth() - 1, 1).getTime();
+            })}
+            onNextMonth={() => setViewMonth(m => {
+              const d = new Date(m);
+              return new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime();
+            })}
+            onPickDay={pickDay}
+          />
+        )}
 
         {/* 카메라별 녹화 현황 — 이 날짜의 녹화를 한눈에 본다 */}
         <div className="cam-picker" role="listbox" aria-label="카메라별 녹화 현황">

@@ -139,3 +139,29 @@ func TestRecordingsOverview(t *testing.T) {
 		t.Errorf("bytes = %v, want 2820", c["bytes"])
 	}
 }
+
+func TestRecordingsDays(t *testing.T) {
+	app, srv := newTestAppFull(t)
+	// base=1_000_000 ms (1970-01-01 로컬) — day 키가 날짜 문자열로 나오는지만 검증
+	seedRecording(t, app, "cam-rec-1", 1_000_000)
+
+	status, raw := doJSON(t, http.MethodGet, srv.URL+"/api/recordings/days?from=0&to=9000000000000", nil)
+	if status != 200 {
+		t.Fatalf("days status=%d", status)
+	}
+	days := raw.(map[string]any)["days"].([]any)
+	if len(days) == 0 {
+		t.Fatal("days 비어 있음")
+	}
+	d := days[0].(map[string]any)
+	day, _ := d["day"].(string)
+	if len(day) != 10 || day[4] != '-' || day[7] != '-' {
+		t.Errorf("day 형식 = %q, want YYYY-MM-DD", day)
+	}
+	if n, _ := d["segments"].(float64); n != 2 {
+		t.Errorf("segments = %v, want 2", d["segments"])
+	}
+	if n, _ := d["cameras"].(float64); n != 1 {
+		t.Errorf("cameras = %v, want 1", d["cameras"])
+	}
+}
