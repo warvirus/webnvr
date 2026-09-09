@@ -887,13 +887,28 @@ input, select { font-family: inherit; }
   font-weight: 700;
 }
 
-/* ── 영상 검색: 날짜 네비 + 달력 나란히 ── */
-.search-layout {
+/* ── 영상 검색: 날짜 버튼 아래에 달력 오버레이(레이아웃 밀림 없음) ── */
+.date-row {
   display: flex;
-  gap: 16px;
-  align-items: flex-start;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
 }
-.search-left {
-  flex: 1;
-  min-width: 220px;
+.date-anchor {
+  position: relative; /* 달력 팝업의 기준점 */
+}
+.cal-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 50;
+  background: var(--panel, #16202c);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+.cal-pop .rec-cal {
+  border: none;
+  background: none;
+  margin-top: 0;
 }

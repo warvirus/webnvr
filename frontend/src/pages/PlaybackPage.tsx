@@ -167,49 +167,42 @@ export function PlaybackPage() {
           </span>
         </div>
 
-        {/* 날짜 네비 — 달력은 날짜 버튼 클릭 시에만 열리고 나란히 표시된다 */}
-        <div className="search-layout">
-          <div className="search-left">
-            <div className="field-row" style={{alignItems: 'end'}}>
-              <div className="field">
-                <label>날짜</label>
-                <div style={{display: 'flex', gap: 4, alignItems: 'center'}}>
-                  <button type="button" className="btn" aria-label="이전 날"
-                    onClick={() => setDayStart(d => d - DAY_MS)}>◀</button>
-                  <button type="button" className="btn btn-date" aria-label="달력에서 선택"
-                    aria-expanded={calOpen}
-                    onClick={() => { setCalOpen(o => !o); setViewMonth(monthOf(dayStart)); }}>
-                    {fmtDay(dayStart)} ▾
-                  </button>
-                  <button type="button" className="btn" aria-label="다음 날"
-                    onClick={() => setDayStart(d => d + DAY_MS)}>▶</button>
-                </div>
-              </div>
-              <div className="field">
-                <label>&nbsp;</label>
-                <button className="btn" disabled={!camId || loading} onClick={() => { loadTimeline(); loadOverview(); }}>
-                  {loading ? '불러오는 중…' : '새로고침'}
-                </button>
-              </div>
+        {/* 날짜 네비 — 달력은 날짜 버튼 아래 오버레이로 열린다(레이아웃 밀림 없음) */}
+        <div className="date-row">
+          <div className="date-anchor">
+            <div style={{display: 'flex', gap: 4, alignItems: 'center'}}>
+              <button type="button" className="btn" aria-label="이전 날"
+                onClick={() => setDayStart(d => d - DAY_MS)}>◀</button>
+              <button type="button" className="btn btn-date" aria-label="달력에서 선택"
+                aria-expanded={calOpen}
+                onClick={() => { setCalOpen(o => !o); setViewMonth(monthOf(dayStart)); }}>
+                {fmtDay(dayStart)} ▾
+              </button>
+              <button type="button" className="btn" aria-label="다음 날"
+                onClick={() => setDayStart(d => d + DAY_MS)}>▶</button>
             </div>
+            {calOpen && (
+              <div className="cal-pop">
+                <RecCalendar
+                  monthStart={viewMonth}
+                  selectedDay={dayStart}
+                  days={dayCounts}
+                  onPrevMonth={() => setViewMonth(m => {
+                    const d = new Date(m);
+                    return new Date(d.getFullYear(), d.getMonth() - 1, 1).getTime();
+                  })}
+                  onNextMonth={() => setViewMonth(m => {
+                    const d = new Date(m);
+                    return new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime();
+                  })}
+                  onPickDay={pickDay}
+                />
+              </div>
+            )}
           </div>
-
-          {calOpen && (
-          <RecCalendar
-            monthStart={viewMonth}
-            selectedDay={dayStart}
-            days={dayCounts}
-            onPrevMonth={() => setViewMonth(m => {
-              const d = new Date(m);
-              return new Date(d.getFullYear(), d.getMonth() - 1, 1).getTime();
-            })}
-            onNextMonth={() => setViewMonth(m => {
-              const d = new Date(m);
-              return new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime();
-            })}
-            onPickDay={pickDay}
-          />
-          )}
+          <button className="btn" disabled={!camId || loading} onClick={() => { loadTimeline(); loadOverview(); }}>
+            {loading ? '불러오는 중…' : '새로고침'}
+          </button>
         </div>
 
         {/* 카메라별 녹화 현황 — 이 날짜의 녹화를 한눈에 본다 */}
