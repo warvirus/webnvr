@@ -795,8 +795,8 @@ input, select { font-family: inherit; }
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--accent, #38b6ff);
-  box-shadow: 0 0 6px rgba(56, 182, 255, 0.7);
+  background: var(--rec, #ff5a5a);
+  box-shadow: 0 0 6px rgba(255, 90, 90, 0.7);
 }
 
 /* ── 다시보기 녹화 달력 ── */
@@ -885,4 +885,15 @@ input, select { font-family: inherit; }
   min-width: 110px;
   font-family: var(--font-mono);
   font-weight: 700;
+}
+
+/* ── 영상 검색: 날짜 네비 + 달력 나란히 ── */
+.search-layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.search-left {
+  flex: 1;
+  min-width: 220px;
 }
