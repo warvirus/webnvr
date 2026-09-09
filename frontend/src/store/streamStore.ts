@@ -45,6 +45,8 @@ interface StreamStoreState {
   pendingCameraUpdate: PendingCameraUpdate;
   // 녹화 중 카메라(모드 포함) — 1분 폴링 + recording_state WS 수신 시 즉시 갱신
   recording: Record<string, RecordingInfo>;
+  // 녹화 데이터 총 사용량(bytes) — refreshRecording에서 함께 갱신 (topbar 표기용)
+  recUsedBytes: number;
 
   startStream: (cameraId: string) => void;
   stopStream: (cameraId: string) => void;
@@ -209,6 +211,7 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
   reconnectAt: null,
   pendingCameraUpdate: {count: 0, ids: [], reloadAll: false},
   recording: {},
+  recUsedBytes: 0,
 
   init: () => {
     console.log('🔌 streamStore.init() 시작 — WS 연결 초기화');
@@ -220,7 +223,7 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
         .then(s => {
           const map: Record<string, RecordingInfo> = {};
           for (const r of s.recording) map[r.cameraId] = r;
-          useStreamStore.setState({recording: map});
+          useStreamStore.setState({recording: map, recUsedBytes: s.usedBytes});
         })
         .catch(() => { /* 백엔드 다운 — 마지막 상태 유지 */ });
     };

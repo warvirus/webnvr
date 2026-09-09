@@ -1,10 +1,17 @@
 // 상단 헤더: 페이지 제목과 주요 동작 (모니터링 제어 포함 — doc 4.7)
-import React from 'react';
+import React, {useEffect, useState} from 'react';
 import {IconPlus, IconFull} from '../common/Icons';
 import {useUIStore} from '../../store/uiStore';
 import {GridMode} from '../../types';
 import {selectOrderedCameras, useCameraStore} from '../../store/cameraStore';
 import {useStreamStore} from '../../store/streamStore';
+import {AppConfig} from '../../types/api';
+import {api} from '../../services/api';
+
+function fmtGB(b: number): string {
+  if (b >= 1 << 30) return `${(b / (1 << 30)).toFixed(1)} GB`;
+  return `${(b / (1 << 20)).toFixed(0)} MB`;
+}
 
 const GRID_OPTIONS: {value: GridMode; label: string}[] = [
   {value: 'auto', label: 'A'},
@@ -53,11 +60,25 @@ export function Toolbar() {
   const connected = useStreamStore(s => s.connected);
   const pendingUpdate = useStreamStore(s => s.pendingCameraUpdate);
   const applyCameraUpdate = useStreamStore(s => s.applyCameraUpdate);
+  const recordingCount = useStreamStore(s => Object.keys(s.recording).length);
+  const recUsedBytes = useStreamStore(s => s.recUsedBytes);
+  const recEnabled = useStreamStore(s => Object.keys(s.recording).length > 0 || s.recUsedBytes > 0);
   const hasPendingUpdate = pendingUpdate.count > 0 || pendingUpdate.reloadAll;
+
+  // 녹화 할당량 — 설정 저장(config_changed) 시 즉시 갱신, 그 외에는 마운트 시 1회
+  const [quotaGB, setQuotaGB] = useState<number | null>(null);
+  useEffect(() => {
+    const load = () => api.appConfig()
+      .then((c: AppConfig) => setQuotaGB(c.recording?.max_usage_gb ?? null))
+      .catch(() => {});
+    load();
+    window.addEventListener('webnvr-config-changed', load);
+    return () => window.removeEventListener('webnvr-config-changed', load);
+  }, []);
 
   const titles: Record<string, {eyebrow: string; title: string}> = {
     monitoring: {eyebrow: 'Live Grid', title: '모니터링'},
-    management: {eyebrow: 'Camera Registry', title: '카메라 등록부'},
+    management: {eyebrow: 'Camera Registry', title: '카메라 관리'},
     settings: {eyebrow: 'Preferences', title: '설정'},
   };
   const t = titles[currentPage] ?? titles.management;
@@ -112,6 +133,14 @@ export function Toolbar() {
                     {' · '}전체 <b>{totalKbps.toLocaleString()}</b> kbps
                     {' · '}<b>{Math.round(totalFps)}</b> fps
                     {totalDrops > 0 && <span className="stats-drops">{' · '}드롭 {totalDrops}</span>}
+                  </span>
+                )}
+                {/* 녹화 상태 — 1분 폴링(recUsedBytes/recording) + 설정 변경 시 즉시 갱신 */}
+                {recEnabled && (
+                  <span className="header-stats">
+                    {' · '}녹화 <b>{fmtGB(recUsedBytes)}</b>
+                    {quotaGB !== null && quotaGB > 0 && <> / {quotaGB}GB</>}
+                    {recordingCount > 0 && <> · 녹화 중 <b>{recordingCount}</b>대</>}
                   </span>
                 )}
               </span>
