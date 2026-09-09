@@ -15,6 +15,7 @@ interface Props {
   retryCount?: number; // 자동 재연결 시도 횟수 (0이면 미표시)
   selected: boolean;
   active: boolean; // 레이아웃에 표시되는 타일인지
+  recording?: boolean; // 백엔드에서 실제 녹화 세션이 살아 있는지
   onSelect: () => void;
   onDoubleClick?: () => void; // 더블클릭 시 확대/축소
 }
@@ -35,7 +36,7 @@ function subscribeFrames(
   return () => window.removeEventListener('webnvr-frame', handler);
 }
 
-export function CameraTile({camera, channel, state, stats, retryCount = 0, selected, active, onSelect, onDoubleClick}: Props) {
+export function CameraTile({camera, channel, state, stats, retryCount = 0, selected, active, recording, onSelect, onDoubleClick}: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<VideoRenderer | null>(null);
   const [glFailed, setGlFailed] = useState(false);
@@ -75,6 +76,11 @@ export function CameraTile({camera, channel, state, stats, retryCount = 0, selec
 
       <div className="tile-head">
         <span className="plate">CH {String(channel).padStart(2, '0')}</span>
+        {recording && camera.recordMode !== 'off' && (
+          camera.recordMode === 'event'
+            ? <span className="tile-rec standby" title="이벤트 녹화 대기 중 — 트리거 시 기록">EVENT</span>
+            : <span className="tile-rec" title="녹화 중"><span className="rec-dot"/>REC</span>
+        )}
         <span className="tile-name">{camera.name}</span>
         <span className="osd-status">
           {history && history.length > 1 && (
