@@ -194,7 +194,7 @@ func TestManagerModeChangeRestartsSession(t *testing.T) {
 	m.NotifyCameras()
 	waitFor(func() bool {
 		s := m.Status()
-		return len(s.Recording) == 1 && s.Recording[0] == "cam-1"
+		return len(s.Recording) == 1 && s.Recording[0].CameraID == "cam-1"
 	})
 	if m.Count() != 1 {
 		t.Fatalf("event 모드 전환 후 세션 = %d, want 1 (24/7 유지)", m.Count())
@@ -206,6 +206,48 @@ func TestManagerModeChangeRestartsSession(t *testing.T) {
 	waitFor(func() bool { return m.Count() == 0 })
 	if m.Count() != 0 {
 		t.Fatalf("off 전환 후 세션 = %d, want 0", m.Count())
+	}
+	m.Close()
+}
+
+// fakeNotifier는 StateNotifier 스파이다.
+type fakeNotifier struct{ calls int }
+
+func (f *fakeNotifier) BroadcastRecordingState() { f.calls++ }
+
+// TestManagerNotifiesOnSessionChange — 세션 추가/제거 시 녹화 상태 브로드캐스트가 1회 이상 온다.
+func TestManagerNotifiesOnSessionChange(t *testing.T) {
+	_, _ = withFakeSink(t)
+	store := newTestStore(t)
+	hub := newFakeHub()
+	cams := []camera.Camera{{ID: "cam-1", RecordMode: camera.RecordContinuous, Enabled: true}}
+	cfg := recCfg()
+	cfg.Storages[0].Path = t.TempDir()
+	m, _ := NewManager(cfg, store, hub, fakeCams{list: cams})
+	nf := &fakeNotifier{}
+	m.SetNotifier(nf)
+
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && m.Count() == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if nf.calls == 0 {
+		t.Fatal("세션 추가 후 녹화 상태 브로드캐스트 없음")
+	}
+
+	// 모드 변경 → 정지+재기동 → 브로드캐스트 추가
+	nf.calls = 0
+	cams[0].RecordMode = camera.RecordOff
+	m.NotifyCameras()
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && m.Count() != 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if nf.calls == 0 {
+		t.Fatal("세션 제거 후 녹화 상태 브로드캐스트 없음")
 	}
 	m.Close()
 }

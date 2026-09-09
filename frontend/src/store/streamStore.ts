@@ -9,6 +9,7 @@ import {useUIStore} from './uiStore';
 import {DecoderHub} from '../services/decoder';
 import {PacketIn} from '../types/stream';
 import {StatSample, StreamState, StreamStats} from '../types/stream';
+import {recordings, RecordingInfo} from '../services/recordings';
 
 // 다른 클라이언트가 카메라를 수정/재정렬/복원했을 때 툴바에 띄우는 "적용 대기" 상태.
 // 추가/삭제는 즉시 반영하므로 여기에 담지 않는다.
@@ -43,6 +44,8 @@ interface StreamStoreState {
   reconnectAt: number | null;
   // 다른 클라이언트의 카메라 수정/재정렬/복원 — 사용자가 툴바 버튼으로 반영한다.
   pendingCameraUpdate: PendingCameraUpdate;
+  // 녹화 중 카메라(모드 포함) — 1분 폴링 + recording_state WS 수신 시 즉시 갱신
+  recording: Record<string, RecordingInfo>;
 
   startStream: (cameraId: string) => void;
   stopStream: (cameraId: string) => void;
@@ -208,13 +211,32 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
   retryAt: null,
   reconnectAt: null,
   pendingCameraUpdate: {count: 0, ids: [], reloadAll: false},
+  recording: {},
 
   init: () => {
     console.log('🔌 streamStore.init() 시작 — WS 연결 초기화');
+
+    // 녹화 상태 조회 + 갱신 스케줄 (1분 폴링 + recording_state 수신 시 즉시)
+    let recTimer: ReturnType<typeof setInterval> | null = null;
+    const refreshRecording = () => {
+      recordings.status()
+        .then(s => {
+          const map: Record<string, RecordingInfo> = {};
+          for (const r of s.recording) map[r.cameraId] = r;
+          useStreamStore.setState({recording: map});
+        })
+        .catch(() => { /* 백엔드 다운 — 마지막 상태 유지 */ });
+    };
+    refreshRecording();
+    recTimer = setInterval(refreshRecording, 60_000);
+
     // WS 서버 메시지 → 디코더/상태 라우팅
     const offMsg = wsService.on(msg => {
       const cameraId = msg.cameraId ?? '';
       switch (msg.type) {
+        case 'recording_state':
+          refreshRecording(); // 녹화 세션 변화 → 즉시 갱신 (1분 폴링 보완)
+          break;
         case 'stream_started': {
           console.log('📤 스트림 시작:', {cameraId, codec: msg.codec, resolution: `${msg.width}x${msg.height}`});
           const hub = getHub();
@@ -336,6 +358,7 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
       offMsg();
       offStatus();
       offRejected();
+      if (recTimer) clearInterval(recTimer);
     };
   },
 

@@ -36,6 +36,7 @@ export interface ServerMsg {
     | 'stream_error'
     | 'cameras_changed'
     | 'config_changed'
+    | 'recording_state'
     | 'stats'
     | 'pong'
     | 'client_limit_exceeded';

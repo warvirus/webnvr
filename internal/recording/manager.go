@@ -28,6 +28,11 @@ type CameraLister interface {
 	List() ([]camera.Camera, error)
 }
 
+// StateNotifier는 녹화 세션 변화를 클라이언트에 알린다. (*ws.Server가 구현, nil 허용)
+type StateNotifier interface {
+	BroadcastRecordingState()
+}
+
 // Manager는 녹화기 집합을 관리한다.
 type Manager struct {
 	pool  *StoragePool
@@ -35,6 +40,7 @@ type Manager struct {
 	hub   HubRef
 	cams  CameraLister
 	jan   *Janitor
+	nf    StateNotifier // 세션 변화 시 브로드캐스트(nil 허용)
 
 	cfgMu sync.RWMutex
 	cfg   config.RecordingConfig
@@ -76,6 +82,16 @@ func (m *Manager) Start(ctx context.Context) error {
 		"max_usage_gb", cfg.MaxUsageGB)
 	m.jan.Start(ctx)
 	return nil
+}
+
+// SetNotifier는 세션 변화 통지자를 주입한다. (App 조립 시, nil 허용)
+func (m *Manager) SetNotifier(n StateNotifier) { m.nf = n }
+
+// notifyState는 세션 집합이 변했음을 클라이언트에 알린다.
+func (m *Manager) notifyState() {
+	if m.nf != nil {
+		m.nf.BroadcastRecordingState()
+	}
 }
 
 // reconcile은 카메라 목록+현재 설정과 세션을 대조해 녹화기를 만들거나 정지한다.
@@ -136,6 +152,9 @@ func (m *Manager) reconcile() error {
 
 	for _, c := range toStart {
 		m.addRecorder(c)
+	}
+	if len(toStop) > 0 || len(toStart) > 0 {
+		m.notifyState() // 녹화 세션 집합 변화 → 클라이언트 즉시 갱신
 	}
 	return nil
 }
@@ -200,9 +219,9 @@ func (m *Manager) Status() StatusInfo {
 	cfg := m.Config()
 	used, _ := m.store.SumBytes()
 	m.mu.Lock()
-	recording := make([]string, 0, len(m.sessions))
-	for id := range m.sessions {
-		recording = append(recording, id)
+	recording := make([]RecordingInfo, 0, len(m.sessions))
+	for id, s := range m.sessions {
+		recording = append(recording, RecordingInfo{CameraID: id, Mode: s.rec.mode})
 	}
 	m.mu.Unlock()
 	return StatusInfo{
@@ -211,6 +230,12 @@ func (m *Manager) Status() StatusInfo {
 		UsedBytes: used,
 		Storages:  m.pool.Roots(),
 	}
+}
+
+// RecordingInfo는 녹화 중 카메라 한 대의 표시 정보다.
+type RecordingInfo struct {
+	CameraID string `json:"cameraId"`
+	Mode     string `json:"mode"` // continuous | event | both
 }
 
 // StorageRoot는 세그먼트 행의 storage_idx를 절대 경로로 해석한다. (재생 서빙용)
@@ -223,10 +248,10 @@ func (m *Manager) Store() *Store { return m.store }
 
 // StatusInfo는 status API 응답이다.
 type StatusInfo struct {
-	Enabled   bool         `json:"enabled"`
-	Recording []string     `json:"recording"`
-	UsedBytes int64        `json:"usedBytes"`
-	Storages  []RootStatus `json:"storages"`
+	Enabled   bool            `json:"enabled"`
+	Recording []RecordingInfo `json:"recording"`
+	UsedBytes int64           `json:"usedBytes"`
+	Storages  []RootStatus    `json:"storages"`
 }
 
 // Config는 현재 녹화 설정을 반환한다.

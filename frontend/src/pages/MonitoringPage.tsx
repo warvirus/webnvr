@@ -7,7 +7,6 @@ import {IconGrid} from '../components/common/Icons';
 import {useCameraStore} from '../store/cameraStore';
 import {useStreamStore} from '../store/streamStore';
 import {useUIStore} from '../store/uiStore';
-import {recordings} from '../services/recordings';
 
 // MonitoringPage는 활성화된 카메라의 실시간 스트림을 그리드로 표시한다.
 export function MonitoringPage() {
@@ -26,18 +25,6 @@ export function MonitoringPage() {
   const pushToast = useUIStore(s => s.pushToast);
   const setPage = useUIStore(s => s.setPage);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // 녹화 중인 카메라 ID 집합 — 백엔드 실제 상태를 5초 주기로 폴링한다
-  const [recordingIds, setRecordingIds] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    let alive = true;
-    const load = () => recordings.status()
-      .then(s => { if (alive) setRecordingIds(new Set(s.recording)); })
-      .catch(() => { /* 백엔드 다운 — 마지막 상태 유지 */ });
-    load();
-    const t = setInterval(load, 5000);
-    return () => { alive = false; clearInterval(t); };
-  }, []);
 
   // 카메라 목록 로드
   useEffect(() => {
@@ -108,7 +95,6 @@ export function MonitoringPage() {
         desired={desired}
         retries={retries}
         selectedId={selectedId}
-        recordingIds={recordingIds}
         onSelect={id => setSelectedId(id === selectedId ? null : id)}
       />
 

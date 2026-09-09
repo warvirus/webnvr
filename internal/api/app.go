@@ -168,6 +168,9 @@ func (a *App) StartWSServer(assets http.FileSystem) error {
 	})
 	// 카메라/앱 설정 변경을 전 클라이언트에 브로드캐스트하도록 통지자 연결
 	a.Camera.notifier = a.wsServer
+	if a.recording != nil {
+		a.recording.SetNotifier(a.wsServer) // 녹화 세션 변화 → recording_state 브로드캐스트
+	}
 
 	mux := http.NewServeMux()
 	mux.Handle("/ws", a.wsServer.Mux())

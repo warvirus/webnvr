@@ -122,6 +122,11 @@ func (s *Server) BroadcastConfigChanged() {
 	s.Broadcast(ServerMsg{Type: MsgConfigChanged})
 }
 
+// BroadcastRecordingState는 녹화 세션 변화를 모든 클라이언트에 알린다. (recording.StateNotifier)
+func (s *Server) BroadcastRecordingState() {
+	s.Broadcast(ServerMsg{Type: MsgRecordingState})
+}
+
 // Addr은 실제 바인딩된 주소다.
 func (s *Server) Addr() string {
 	s.mu.Lock()

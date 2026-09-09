@@ -13,7 +13,6 @@ interface Props {
   desired: Record<string, boolean>;
   retries: Record<string, number>;
   selectedId: string | null;
-  recordingIds: Set<string>; // 백엔드에서 실제 녹화 중인 카메라 ID
   onSelect: (cameraId: string) => void;
 }
 
@@ -31,7 +30,7 @@ function colsFor(mode: GridMode, slots: number): number {
 }
 
 // CameraGrid는 활성화된 카메라를 OSD 타일로 배치한다.
-export function CameraGrid({cameras, states, stats, desired, retries, selectedId, recordingIds, onSelect}: Props) {
+export function CameraGrid({cameras, states, stats, desired, retries, selectedId, onSelect}: Props) {
   const gridMode = useUIStore(s => s.gridMode);
   const gridPage = useUIStore(s => s.gridPage);
   const zoomToggle = useUIStore(s => s.zoomToggle);
@@ -58,7 +57,6 @@ export function CameraGrid({cameras, states, stats, desired, retries, selectedId
           channel={offset + i + 1}
           state={states[cam.id] ?? 'idle'}
           stats={stats[cam.id]}
-          recording={recordingIds.has(cam.id)}
           selected={selectedId === cam.id}
           active={i < slots}
           onSelect={() => onSelect(cam.id)}

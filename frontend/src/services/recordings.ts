@@ -65,9 +65,14 @@ export interface StorageStatus {
   minFreePercent: number;
 }
 
+export interface RecordingInfo {
+  cameraId: string;
+  mode: string; // continuous | event | both
+}
+
 export interface RecordingStatus {
   enabled: boolean;
-  recording: string[];
+  recording: RecordingInfo[];
   usedBytes: number;
   storages: StorageStatus[];
 }

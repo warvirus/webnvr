@@ -67,6 +67,7 @@ const (
 	MsgStreamError         = "stream_error"
 	MsgCamerasChanged      = "cameras_changed" // 카메라 목록/설정 변경 — 클라이언트가 새로고침
 	MsgConfigChanged       = "config_changed"  // 앱 설정 변경
+	MsgRecordingState      = "recording_state" // 녹화 세션 변화 — 클라이언트가 /api/recordings/status 즉시 재조회
 	MsgStats               = "stats"
 	MsgPong                = "pong"
 	MsgClientLimitExceeded = "client_limit_exceeded"
