@@ -37,7 +37,6 @@ interface StreamStoreState {
   // cameraId → 자동 재연결 시도 횟수 (타일 표시용)
   retries: Record<string, number>;
   connected: boolean;
-  lastError: string | null;
   rejected: boolean;
   retryAt: number | null;
   // 연결이 끊긴 동안 다음 WS 재시도 예정 시각(epoch ms). 연결되면 null.
@@ -165,23 +164,22 @@ function getHub(): DecoderHub {
         window.dispatchEvent(new CustomEvent('webnvr-frame', {detail: {cameraId, frame}}));
       },
       onDecoded: (cameraId) => {
-        // 디코딩 성공 → 재시도 카운터 리셋 + 배너 해제
+        // 디코딩 성공 → 재시도 카운터 리셋
         nextRetryAt[cameraId] = 0;
         useStreamStore.setState(s => ({
           states: {...s.states, [cameraId]: 'streaming'},
           retries: {...s.retries, [cameraId]: 0},
-          lastError: null,
         }));
       },      onNotice: (cameraId, message) => {
         // 자가 치유 진행(포맷 전환 등) — 타일 상태는 유지. 레이아웃을 밀지 않도록
-        // 하단 고정 토스트로만 알린다(그리드 위 배너 lastError는 진짜 오류 전용).
+        // 하단 고정 토스트로만 알린다.
         useUIStore.getState().pushToast('info', message);
       },
       onError: (cameraId, message) => {
-        useStreamStore.setState(s => ({
-          states: {...s.states, [cameraId]: 'error'},
-          lastError: message,
-        }));
+        // 디코더 오류 — 타일이 '오류' 상태로 표시되므로 레이아웃을 밀지 않게
+        // 하단 고정 토스트로만 알린다(기존 그리드 위 배너 제거).
+        useStreamStore.setState(s => ({states: {...s.states, [cameraId]: 'error'}}));
+        useUIStore.getState().pushToast('error', message);
       },
       onStats: (cameraId, stats) => {
         useStreamStore.setState(s => {
@@ -206,7 +204,6 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
   desired: {},
   retries: {},
   connected: false,
-  lastError: null,
   rejected: false,
   retryAt: null,
   reconnectAt: null,
@@ -304,7 +301,9 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
         case 'stream_error': {
           console.error('❌ stream_error 수신', {cameraId, error: msg.error});
           getHub().detach(cameraId);
-          set(s => ({states: {...s.states, [cameraId]: 'error'}, lastError: msg.error ?? '알 수 없는 오류'}));
+          // 백엔드 RTSP 오류 — 타일 '오류' 상태 + 하단 토스트(레이아웃 무영향)
+          set(s => ({states: {...s.states, [cameraId]: 'error'}}));
+          useUIStore.getState().pushToast('error', msg.error ?? '알 수 없는 오류');
           break;
         }
         case 'cameras_changed': {

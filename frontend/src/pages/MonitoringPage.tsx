@@ -18,10 +18,8 @@ export function MonitoringPage() {
   const desired = useStreamStore(s => s.desired);
   const retries = useStreamStore(s => s.retries);
   const connected = useStreamStore(s => s.connected);
-  const lastError = useStreamStore(s => s.lastError);
   const startStream = useStreamStore(s => s.startStream);
   const stopStream = useStreamStore(s => s.stopStream);
-  const clearError = () => useStreamStore.setState({lastError: null});
   const pushToast = useUIStore(s => s.pushToast);
   const setPage = useUIStore(s => s.setPage);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -80,12 +78,6 @@ export function MonitoringPage() {
     <>
       {!connected && (
         <div className="test-box test-fail">백엔드와 연결이 끊겼습니다. 자동으로 재연결 중…</div>
-      )}
-      {connected && lastError && (
-        <div className="test-box test-fail">
-          {lastError}
-          <button className="btn" style={{marginLeft: 10}} onClick={clearError}>닫기</button>
-        </div>
       )}
 
       <CameraGrid
