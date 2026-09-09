@@ -40,10 +40,12 @@ func main() {
 	uiFS, err := fs.Sub(assets, "frontend/dist")
 	if err != nil {
 		slog.Error("임베디드 UI 서브트리 접근 실패", "err", err)
+		appCtx.Close() // 녹화 세그먼트 flush 포함 정리
 		os.Exit(1)
 	}
 	if err := appCtx.StartWSServer(http.FS(uiFS)); err != nil {
 		slog.Error("HTTP/WS 서버 시작 실패 — 8080 포트를 점유한 프로세스를 종료하거나 config/app.json의 ws_port를 변경하세요", "err", err)
+		appCtx.Close() // 녹화 세그먼트 flush 포함 정리
 		os.Exit(1)
 	}
 

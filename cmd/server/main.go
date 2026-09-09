@@ -29,6 +29,7 @@ func main() {
 
 	if err := appCtx.StartWSServer(ui); err != nil {
 		slog.Error("HTTP/WS 서버 시작 실패 — 8080 포트를 점유한 프로세스를 종료하거나 config/app.json의 ws_port를 변경하세요", "err", err)
+		appCtx.Close() // 녹화 세그먼트 flush 포함 정리
 		os.Exit(1)
 	}
 	for _, u := range api.LANAddresses(8080) {
