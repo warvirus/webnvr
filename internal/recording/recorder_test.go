@@ -3,6 +3,7 @@ package recording
 import (
 	"testing"
 
+	"webnvr/internal/camera"
 	"webnvr/internal/stream"
 )
 
@@ -46,7 +47,7 @@ func TestRecorderRotatesOnTimeAndSize(t *testing.T) {
 	sinks, setNow := withFakeSink(t)
 	s := newTestStore(t)
 	// segment_seconds=10, segment_max_mb=1 (=1MiB)
-	r := NewRecorder("cam-1", t.TempDir(), 0, 10, 1, s)
+	r := NewRecorder(RecorderConfig{CameraID: "cam-1", Pool: testPool(t), SegmentSeconds: 10, SegmentMaxMB: 1, Mode: camera.RecordContinuous, Store: s})
 	r.OnInfo(stream.CodecH264, []byte{0x67, 1}, []byte{0x68, 1}, nil)
 
 	// 첫 non-key → 무시 (세그먼트 없음)
@@ -110,7 +111,7 @@ func TestRecorderRotatesOnTimeAndSize(t *testing.T) {
 func TestRecorderGapMarksDiscontinuity(t *testing.T) {
 	_, _ = withFakeSink(t)
 	s := newTestStore(t)
-	r := NewRecorder("cam-1", t.TempDir(), 0, 300, 512, s)
+	r := NewRecorder(RecorderConfig{CameraID: "cam-1", Pool: testPool(t), SegmentSeconds: 300, SegmentMaxMB: 512, Mode: camera.RecordContinuous, Store: s})
 	r.OnInfo(stream.CodecH264, nil, nil, nil)
 
 	n, _ := au(true)
@@ -134,7 +135,7 @@ func TestRecorderGapMarksDiscontinuity(t *testing.T) {
 func TestRecorderRejectsUnsupportedCodec(t *testing.T) {
 	sinks, _ := withFakeSink(t)
 	s := newTestStore(t)
-	r := NewRecorder("cam-1", t.TempDir(), 0, 300, 512, s)
+	r := NewRecorder(RecorderConfig{CameraID: "cam-1", Pool: testPool(t), SegmentSeconds: 300, SegmentMaxMB: 512, Mode: camera.RecordContinuous, Store: s})
 	r.OnInfo(stream.Codec("mjpeg"), nil, nil, nil)
 	n, _ := au(true)
 	r.OnNALU(stream.Codec("mjpeg"), n, 90000, true)

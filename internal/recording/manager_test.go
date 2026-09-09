@@ -70,6 +70,13 @@ func (h *fakeHub) tapOf(id string) stream.NALUTap {
 	return h.taps[id]
 }
 
+func (h *fakeHub) hasChan(id string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, ok := h.chans[id]
+	return ok
+}
+
 type fakeCams struct{ list []camera.Camera }
 
 func (c fakeCams) List() ([]camera.Camera, error) { return c.list, nil }
@@ -90,8 +97,8 @@ func TestManagerRecordsContinuousCamera(t *testing.T) {
 	store := newTestStore(t)
 	hub := newFakeHub()
 	cams := fakeCams{list: []camera.Camera{
-		{ID: "cam-1", RecordMode: camera.RecordContinuous},
-		{ID: "cam-2", RecordMode: camera.RecordOff},
+		{ID: "cam-1", RecordMode: camera.RecordContinuous, Enabled: true},
+		{ID: "cam-2", RecordMode: camera.RecordOff, Enabled: true},
 	}}
 
 	cfg := recCfg()
@@ -117,6 +124,11 @@ func TestManagerRecordsContinuousCamera(t *testing.T) {
 	}
 
 	// StartedEvent → OnInfo, 이어서 탭으로 IDR + 슬라이스 공급
+	// (supervise가 hub.Start로 채널을 만들 때까지 대기 — emit의 nil 채널 데드락 방지)
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !hub.hasChan("cam-1") {
+		time.Sleep(10 * time.Millisecond)
+	}
 	hub.emit("cam-1", stream.StartedEvent{Info: stream.Info{Codec: stream.CodecH264, SPS: []byte{0x67, 1}, PPS: []byte{0x68, 1}}})
 	time.Sleep(50 * time.Millisecond)
 	tap := hub.tapOf("cam-1")
@@ -152,4 +164,48 @@ func TestManagerNoRecorderWhenDisabledList(t *testing.T) {
 	if len(hub.Running()) != 0 {
 		t.Errorf("off인데 스트림 시작됨: %v", hub.Running())
 	}
+}
+
+// TestManagerModeChangeRestartsSession — 모드 변경 시 세션이 정지 후 재기동된다.
+func TestManagerModeChangeRestartsSession(t *testing.T) {
+	_, _ = withFakeSink(t)
+	store := newTestStore(t)
+	hub := newFakeHub()
+	cams := []camera.Camera{{ID: "cam-1", RecordMode: camera.RecordContinuous, Enabled: true}}
+	cfg := recCfg()
+	cfg.Storages[0].Path = t.TempDir()
+	m, _ := NewManager(cfg, store, hub, fakeCams{list: cams})
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitFor := func(cond func() bool) {
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) && !cond() {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	waitFor(func() bool { return m.Count() == 1 })
+	if m.Count() != 1 {
+		t.Fatal("continuous 세션 미시작")
+	}
+
+	// continuous → event: 세션이 유지되어야 한다 (pre-roll을 위해 24/7 세션 필요)
+	cams[0].RecordMode = camera.RecordEvent
+	m.NotifyCameras()
+	waitFor(func() bool {
+		s := m.Status()
+		return len(s.Recording) == 1 && s.Recording[0] == "cam-1"
+	})
+	if m.Count() != 1 {
+		t.Fatalf("event 모드 전환 후 세션 = %d, want 1 (24/7 유지)", m.Count())
+	}
+
+	// event → off: 세션 제거
+	cams[0].RecordMode = camera.RecordOff
+	m.NotifyCameras()
+	waitFor(func() bool { return m.Count() == 0 })
+	if m.Count() != 0 {
+		t.Fatalf("off 전환 후 세션 = %d, want 0", m.Count())
+	}
+	m.Close()
 }

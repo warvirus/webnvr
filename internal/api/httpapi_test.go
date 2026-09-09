@@ -13,6 +13,14 @@ import (
 // newTestApp은 임시 설정 디렉토리 기반의 App과 테스트 서버를 만든다.
 func newTestApp(t *testing.T) *httptest.Server {
 	t.Helper()
+	_, srv := newTestAppFull(t)
+	_ = srv
+	return srv
+}
+
+// newTestAppFull은 App 자체도 함께 반환한다. (녹화 매니저 접근 등 내부 검증용)
+func newTestAppFull(t *testing.T) (*App, *httptest.Server) {
+	t.Helper()
 	dir := t.TempDir()
 	app, err := New(dir)
 	if err != nil {
@@ -22,10 +30,11 @@ func newTestApp(t *testing.T) *httptest.Server {
 	mux := http.NewServeMux()
 	mux.Handle("/ws", app.wsServer.Mux())
 	RegisterHTTP(mux, app)
+	RegisterRecordingHTTP(mux, app)
 
 	srv := httptest.NewServer(CORS(mux))
 	t.Cleanup(srv.Close)
-	return srv
+	return app, srv
 }
 
 // obj는 any를 map으로 단언한다.

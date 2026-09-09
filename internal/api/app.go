@@ -30,7 +30,7 @@ type App struct {
 	wsServer  *ws.Server
 	logCloser io.Closer
 	database  *db.DB
-	recording *recording.Manager // config.Recording.Enabled일 때만 생성됨
+	recording *recording.Manager // 녹화 매니저 — 항상 생성(아이들), enabled 시 녹화
 }
 
 // New는 설정 디렉토리를 기준으로 모든 서비스를 초기화한다.
@@ -69,29 +69,24 @@ func New(configDir string) (*App, error) {
 	cameraSvc := &CameraService{mgr: mgr, appCfg: appCfg, configDir: configDir, database: database}
 	streamSvc := NewStreamService(mgr)
 
+	// 녹화 매니저 (Phase R) — 항상 생성(아이들). enabled 시 녹화 세션을 맺고,
+	// 카메라 mutation/설정 변경을 즉시 반영한다(reconcile). Hub 영구 ref로 24/7 RTSP 세션 유지.
+	recMgr, err := recording.NewManager(
+		appCfg.Recording, recording.NewStore(database.SQL()), streamSvc.Hub(), mgr)
+	if err != nil {
+		logCloser.Close()
+		database.Close()
+		return nil, fmt.Errorf("녹화 매니저 초기화 실패: %w", err)
+	}
+	recMgr.Start(context.Background()) // janitor 포함 — 실패해도 서비스는 계속(로그로 추적)
+	cameraSvc.recManager = recMgr
+
 	app := &App{
 		Camera:    cameraSvc,
 		Stream:    streamSvc,
 		logCloser: logCloser,
 		database:  database,
-	}
-
-	// 녹화 매니저 (Phase R) — enabled일 때만. Hub 영구 ref로 24/7 RTSP 세션을 유지한다.
-	if appCfg.Recording.Enabled {
-		recMgr, err := recording.NewManager(
-			appCfg.Recording, recording.NewStore(database.SQL()), streamSvc.Hub(), mgr)
-		if err != nil {
-			logCloser.Close()
-			database.Close()
-			return nil, fmt.Errorf("녹화 매니저 초기화 실패: %w", err)
-		}
-		if err := recMgr.Start(context.Background()); err != nil {
-			recMgr.Close()
-			logCloser.Close()
-			database.Close()
-			return nil, fmt.Errorf("녹화 시작 실패: %w", err)
-		}
-		app.recording = recMgr
+		recording: recMgr,
 	}
 	return app, nil
 }
@@ -177,6 +172,7 @@ func (a *App) StartWSServer(assets http.FileSystem) error {
 	mux := http.NewServeMux()
 	mux.Handle("/ws", a.wsServer.Mux())
 	RegisterHTTP(mux, a)
+	RegisterRecordingHTTP(mux, a)
 	if assets != nil {
 		registerUI(mux, assets)
 	}

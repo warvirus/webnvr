@@ -15,6 +15,7 @@ import (
 	"webnvr/internal/config"
 	"webnvr/internal/db"
 	"webnvr/internal/onvif"
+	"webnvr/internal/recording"
 )
 
 // CameraDTO는 프론트엔드로 전달되는 카메라 정보다. 비밀번호는 노출하지 않는다.
@@ -139,20 +140,24 @@ type PresetDTO struct {
 
 // CameraService는 카메라 CRUD와 ONVIF 연산을 담당하는 서비스 계층이다.
 type CameraService struct {
-	mgr       *camera.Manager
-	appCfg    *config.AppConfig
-	configDir string
-	database  *db.DB
-	notifier  changeBroadcaster // App 조립 시 주입(nil 허용 — 헤드리스 도구/유닛 테스트)
+	mgr        *camera.Manager
+	appCfg     *config.AppConfig
+	configDir  string
+	database   *db.DB
+	notifier   changeBroadcaster   // App 조립 시 주입(nil 허용 — 헤드리스 도구/유닛 테스트)
+	recManager *recording.Manager  // 녹화 매니저 — mutation/설정 변경 즉시 반영용(nil 허용)
 }
 
 // SetConfigDir는 설정 디렉토리를 지정한다. (App 조립 시 호출)
 func (s *CameraService) SetConfigDir(dir string) { s.configDir = dir }
 
-// notifyCameras는 카메라 변경을 브로드캐스트한다. (notifier가 nil이면 무동작)
+// notifyCameras는 카메라 변경을 브로드캐스트하고 녹화 매니저에 리컨실을 요청한다.
 func (s *CameraService) notifyCameras(reason, cameraID string) {
 	if s.notifier != nil {
 		s.notifier.BroadcastCamerasChanged(reason, cameraID)
+	}
+	if s.recManager != nil {
+		s.recManager.NotifyCameras() // record_mode/enabled 변경 즉시 반영
 	}
 }
 
@@ -418,6 +423,9 @@ func (s *CameraService) UpdateAppConfig(raw map[string]any) (*config.AppConfig, 
 	if s.notifier != nil {
 		s.notifier.BroadcastConfigChanged()
 	}
+	if s.recManager != nil {
+		s.recManager.UpdateRecordingConfig(cfg.Recording) // 동적 반영 (janitor/세션 리컨실)
+	}
 	return cfg, nil
 }
 
@@ -483,6 +491,14 @@ func (s *CameraService) RestoreBackup(backup BackupFile) (int, error) {
 // SecurityStatusOf는 현재 보안 상태를 반환한다.
 func SecurityStatusOf() SecurityStatus {
 	return SecurityStatus{MasterKeySource: string(config.KeySourceOf())}
+}
+
+// TriggerCameraEvent는 카메라에 수동 이벤트 녹화를 트리거한다. (R.4)
+func (s *CameraService) TriggerCameraEvent(id, typ string) error {
+	if s.recManager == nil {
+		return fmt.Errorf("녹화 기능을 사용할 수 없습니다")
+	}
+	return s.recManager.TriggerEvent(id, typ)
 }
 
 // TestDirectStream은 직접 스트림 URL의 형식과 도달 가능성을 검증한다.

@@ -30,6 +30,10 @@ func errBadReq(msg string) *httpError {
 	return &httpError{status: http.StatusBadRequest, message: msg}
 }
 
+func errInternal(msg string) *httpError {
+	return &httpError{status: http.StatusInternalServerError, message: msg}
+}
+
 // writeJSON은 응답을 JSON으로 직렬화한다.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -309,10 +313,29 @@ func RegisterHTTP(mux *http.ServeMux, app *App) {
 			cameraPresets(w, r, app, id)
 		case len(parts) == 2 && parts[1] == "stream-uri":
 			cameraStreamURI(w, r, app, id)
+		case len(parts) == 3 && parts[1] == "record" && parts[2] == "event":
+			cameraTriggerEvent(w, r, app, id)
 		default:
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "알 수 없는 경로: " + r.URL.Path})
 		}
 	})
+}
+
+// cameraTriggerEvent는 POST /api/cameras/{id}/record/event를 처리한다. (R.4 수동 트리거)
+func cameraTriggerEvent(w http.ResponseWriter, r *http.Request, app *App, id string) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST만 허용"})
+		return
+	}
+	var req struct {
+		Type string `json:"type"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req) // body 없어도 허용 — type 기본값 manual
+	if err := app.Camera.TriggerCameraEvent(id, req.Type); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // cameraByID는 /api/cameras/{id} (GET/PUT/DELETE)를 처리한다.

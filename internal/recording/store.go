@@ -108,6 +108,47 @@ func (s *Store) Get(id int64) (Segment, error) {
 	return scanSeg(s.db.QueryRow(`SELECT `+segCols+` FROM segments WHERE id=?`, id))
 }
 
+// Event는 이벤트 트리거 기록(클립 메타)이다.
+type Event struct {
+	ID        int64
+	CameraID  string
+	TS        int64  // 트리거 벽시계 epoch ms
+	Type      string // manual | schedule | onvif ...
+	SegmentID int64  // 연결된 이벤트 클립 세그먼트
+	Note      string
+}
+
+// InsertEvent는 이벤트 기록을 추가한다.
+func (s *Store) InsertEvent(e Event) (int64, error) {
+	res, err := s.db.Exec(
+		`INSERT INTO events (camera_id, ts, type, segment_id, note) VALUES (?,?,?,?,?)`,
+		e.CameraID, e.TS, e.Type, e.SegmentID, e.Note)
+	if err != nil {
+		return 0, fmt.Errorf("events INSERT: %w", err)
+	}
+	return res.LastInsertId()
+}
+
+// EventsRange는 카메라의 [fromMS, toMS] 구간 이벤트를 ts 순으로 반환한다.
+func (s *Store) EventsRange(cameraID string, fromMS, toMS int64) ([]Event, error) {
+	rows, err := s.db.Query(
+		`SELECT id, camera_id, ts, type, COALESCE(segment_id,0), note FROM events
+		 WHERE camera_id=? AND ts BETWEEN ? AND ? ORDER BY ts`, cameraID, fromMS, toMS)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Event
+	for rows.Next() {
+		var e Event
+		if err := rows.Scan(&e.ID, &e.CameraID, &e.TS, &e.Type, &e.SegmentID, &e.Note); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 func collect(rows *sql.Rows) ([]Segment, error) {
 	defer rows.Close()
 	var out []Segment

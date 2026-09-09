@@ -37,6 +37,29 @@ func seedSegments(t *testing.T, s *Store, n int, base, step, bytes int64) []int6
 	return ids
 }
 
+// testPool은 임시 디렉토리 1개짜리 StoragePool이다.
+func testPool(t *testing.T) *StoragePool {
+	t.Helper()
+	p, err := NewStoragePool([]config.StorageConfig{{Path: t.TempDir(), MinFreePercent: 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// cfgPool은 cfg.Storages 그대로의 풀이다 (여유 하한이 반영됨).
+func cfgPool(t *testing.T, storages []config.StorageConfig) *StoragePool {
+	t.Helper()
+	for i := range storages {
+		storages[i].Path = t.TempDir() // 실존 경로 필요 (Roots의 freePercent 프루빙)
+	}
+	p, err := NewStoragePool(storages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
 func TestJanitorRetention(t *testing.T) {
 	now := int64(100 * dayMS)
 	withFixedNow(t, now)
@@ -44,8 +67,9 @@ func TestJanitorRetention(t *testing.T) {
 	// 10일 전부터 하루 간격 12개
 	seedSegments(t, s, 12, now-12*dayMS, dayMS, 1000)
 
-	cfg := config.RecordingConfig{RetentionDays: 5, KeepMinHours: 1}
-	j := NewJanitor(cfg, s, t.TempDir(), nil)
+	cfg := config.RecordingConfig{Enabled: true, RetentionDays: 5, KeepMinHours: 1,
+		Storages: []config.StorageConfig{{Path: "recordings", MinFreePercent: 0}}}
+	j := NewJanitor(cfg, s, cfgPool(t, cfg.Storages), nil)
 	j.Sweep()
 
 	rows, _ := s.Oldest(100)
@@ -68,10 +92,10 @@ func TestJanitorQuota(t *testing.T) {
 	seedSegments(t, s, 20, now-20*int64(3600_000), 3600_000, 100_000_000)
 
 	cfg := config.RecordingConfig{
-		MaxUsageGB: 1, ReclaimPercent: 10, KeepMinHours: 1,
+		Enabled: true, MaxUsageGB: 1, ReclaimPercent: 10, KeepMinHours: 1,
 		Storages: []config.StorageConfig{{Path: "recordings", MinFreePercent: 0}},
 	}
-	j := NewJanitor(cfg, s, t.TempDir(), nil)
+	j := NewJanitor(cfg, s, cfgPool(t, cfg.Storages), nil)
 	j.Sweep()
 
 	used, _ := s.SumBytes()
@@ -93,10 +117,10 @@ func TestJanitorDiskFloor(t *testing.T) {
 	seedSegments(t, s, 10, now-10*int64(3600_000), 3600_000, 1_000_000)
 
 	cfg := config.RecordingConfig{
-		ReclaimPercent: 0, KeepMinHours: 0,
+		Enabled: true, ReclaimPercent: 0, KeepMinHours: 0,
 		Storages: []config.StorageConfig{{Path: "recordings", MinFreePercent: 5}},
 	}
-	j := NewJanitor(cfg, s, t.TempDir(), nil)
+	j := NewJanitor(cfg, s, cfgPool(t, cfg.Storages), nil)
 	j.Sweep()
 
 	// freePercent가 계속 2%로 고정이라 janitor는 전부 지우고 "목표 미달" 경고 후 멈춘다
@@ -115,10 +139,10 @@ func TestJanitorKeepMinHoursProtects(t *testing.T) {
 	seedSegments(t, s, 5, now-30*60_000, 5*60_000, 1_000_000)
 
 	cfg := config.RecordingConfig{
-		KeepMinHours: 1,
+		Enabled: true, KeepMinHours: 1,
 		Storages:     []config.StorageConfig{{Path: "recordings", MinFreePercent: 90}},
 	}
-	j := NewJanitor(cfg, s, t.TempDir(), nil)
+	j := NewJanitor(cfg, s, cfgPool(t, cfg.Storages), nil)
 	j.Sweep()
 
 	rows, _ := s.Oldest(100)
