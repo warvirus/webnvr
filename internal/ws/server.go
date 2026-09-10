@@ -28,10 +28,11 @@ type Server struct {
 	addr       string
 	maxClients func() int // 최대 동시 접속 수 (nil 또는 0 반환 = 무제한)
 
-	mu    sync.Mutex
-	ln    net.Listener
-	http  *http.Server
-	conns map[*connState]struct{}
+	mu        sync.Mutex
+	ln        net.Listener
+	http      *http.Server
+	https     *http.Server // HTTPS(8443) 보조 서버 — Stop에서 함께 종료된다
+	conns     map[*connState]struct{}
 }
 
 // NewServer는 컨트롤러와 바인딩 주소로 서버를 생성한다.
@@ -61,7 +62,9 @@ func (s *Server) StartWithHandler(h http.Handler) error {
 	}
 	s.mu.Lock()
 	s.ln = ln
-	s.http = &http.Server{Handler: h}
+	// ReadHeaderTimeout만 둔다 — WriteTimeout은 WS 업그레이드 후 Hijack 연결에도 적용되어
+	// 장시간 스트림을 끊게 만든다. 헤더 지연(Slowloris)만 방어한다.
+	s.http = &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second}
 	s.mu.Unlock()
 
 	certFile := os.Getenv("WEB_CERT")
@@ -85,8 +88,11 @@ func (s *Server) StartWithHandler(h http.Handler) error {
 			return nil
 		}
 
+		httpsTLS := &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second}
+		s.mu.Lock()
+		s.https = httpsTLS
+		s.mu.Unlock()
 		go func() {
-			httpsTLS := &http.Server{Handler: h}
 			slog.Info("HTTPS/WSS 서버 시작", "addr", lnTLS.Addr().String())
 			if err := httpsTLS.ServeTLS(lnTLS, certFile, keyFile); err != nil && err != http.ErrServerClosed {
 				slog.Error("HTTPS 서버 오류", "err", err)
@@ -147,6 +153,12 @@ func (s *Server) Stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	err := s.http.Shutdown(ctx)
+	if s.https != nil {
+		if err2 := s.https.Shutdown(ctx); err == nil {
+			err = err2
+		}
+		s.https = nil
+	}
 	s.http = nil
 	s.ln = nil
 	return err

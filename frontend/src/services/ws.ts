@@ -5,6 +5,7 @@ import {backendWS} from './backend';
 const HEARTBEAT_MS = 25_000;
 const MAX_BACKOFF_MS = 30_000;
 const REJECT_RETRY_MS = 60_000;
+const MAX_QUEUE = 100; // 재연결 대기 큐 상한 — 장애가 길어져도 스탬피드를 막는다
 
 type Handler = (msg: ServerMsg) => void;
 // 끊긴 경우 reconnectAt = 다음 재시도 예정 시각(epoch ms)
@@ -92,13 +93,24 @@ export class WsService {
   }
 
   // send는 메시지를 전송한다. 연결이 끊긴 경우 큐에 적재한다.
+  // start_stream/stop_stream는 카메라별 마지막 의도만 유지한다(last-wins) —
+  // 리컨실리어가 끊긴 동안 1초마다 쌓는 start_stream이 재연결 시 스탬피드가 되는 것을 막는다.
   send(msg: ClientMsg) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg));
-    } else if (msg.type === 'ptz' || msg.type === 'ping') {
-      // 일회성 명령은 큐잉하지 않는다 (재연결 시 무의미)
-    } else {
-      this.queue.push(msg);
+      return;
+    }
+    if (msg.type === 'ptz' || msg.type === 'ping') {
+      return; // 일회성 명령은 큐잉하지 않는다 (재연결 시 무의미)
+    }
+    const key = msg.cameraId ? `${msg.type}:${msg.cameraId}` : null;
+    if (key) {
+      // 같은 (type, cameraId)의 이전 메시지는 마지막 의도로 대체된다
+      this.queue = this.queue.filter(m => (m.cameraId ? `${m.type}:${m.cameraId}` : null) !== key);
+    }
+    this.queue.push(msg);
+    if (this.queue.length > MAX_QUEUE) {
+      this.queue.splice(0, this.queue.length - MAX_QUEUE);
     }
   }
 

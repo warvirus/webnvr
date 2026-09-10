@@ -60,6 +60,21 @@ interface StreamStoreState {
 // 디코더 허브 싱글턴 (모듈 로드 시 1회 생성)
 let hub: DecoderHub | null = null;
 
+// ── 프레임 구독 레지스트리 ────────────────────────────────────
+// 화면에 표시 중인 타일(CameraTile)이 카메라별로 등록한다. 구독자가 없는 카메라의
+// VideoFrame은 디코더 허브가 즉시 close한다(페이지네이션 숨김 채널의 GPU 메모리 누수 방지).
+const frameListeners = new Map<string, number>();
+
+// frameListenerAdded/Removed는 타일이 구독을 시작/끝낼 때 호출한다.
+export function frameListenerAdded(cameraId: string): void {
+  frameListeners.set(cameraId, (frameListeners.get(cameraId) ?? 0) + 1);
+}
+export function frameListenerRemoved(cameraId: string): void {
+  const n = (frameListeners.get(cameraId) ?? 1) - 1;
+  if (n <= 0) frameListeners.delete(cameraId);
+  else frameListeners.set(cameraId, n);
+}
+
 // ── 자동 재연결(Desired-State Reconciler) ─────────────────────
 // desired[cameraId]=true인 스트림이 'streaming'이 아니면 재시도한다.
 // 중요: 'starting'(연결/GOP 대기 진행 중)은 실패가 아니다 — 시도 시간 초과 시에만
@@ -163,6 +178,12 @@ function getHub(): DecoderHub {
       onFrame: (cameraId, frame) => {
         // 프레임은 VideoFrameRenderer(CustomEvent)로 타일에 전달한다
         // (스토어에 VideoFrame을 보관하지 않아 GC 부담 최소화)
+        // 구독 중인 타일이 없으면(페이지네이션으로 숨겨진 채널) 즉시 close한다 —
+        // GPU 백 VideoFrame이 GC에만 의존하면 장시간 운용에서 메모리 압박이 온다.
+        if ((frameListeners.get(cameraId) ?? 0) === 0) {
+          frame.close();
+          return;
+        }
         window.dispatchEvent(new CustomEvent('webnvr-frame', {detail: {cameraId, frame}}));
       },
       onDecoded: (cameraId) => {

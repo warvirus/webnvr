@@ -4,6 +4,7 @@ import {AppConfig, BackupFile, SecurityInfo} from '../types/api';
 import {api} from '../services/api';
 import {recordings, RecordingStatus} from '../services/recordings';
 import {useUIStore} from '../store/uiStore';
+import {useCameraStore} from '../store/cameraStore';
 import {markSelfEdit} from '../store/selfEdits';
 
 const KEY_SOURCE_LABEL: Record<string, string> = {
@@ -98,6 +99,7 @@ export function SettingsPage() {
       const backup = JSON.parse(await file.text()) as BackupFile;
       markSelfEdit('restored'); // 되돌아온 cameras_changed 에코로 자기 배지를 띄우지 않게
       const res = await api.restoreBackup(backup);
+      useCameraStore.getState().fetchCameras().catch(() => {}); // 복원으로 목록이 통째로 바뀐다
       pushToast('ok', `${res.restored}대의 카메라가 복원되었습니다. 비밀번호는 다시 입력해야 합니다.`);
     } catch (e) {
       pushToast('error', `복원 실패: ${String(e)}`);

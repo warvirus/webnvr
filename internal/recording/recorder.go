@@ -53,23 +53,24 @@ type Recorder struct {
 
 	lastIdx int // 마지막으로 쓴 스토리지 인덱스 (다음 Pick 선호)
 
-	mu       sync.Mutex
-	codec    stream.Codec
-	sps      []byte
-	pps      []byte
-	vps      []byte
-	cur      segmentSink // 상시 회전 세그먼트 (continuous/both)
-	curSeg   *Segment
-	openWall int64
-	openPTS  int64
-	lastPTS  int64
+	mu          sync.Mutex
+	codec       stream.Codec
+	sps         []byte
+	pps         []byte
+	vps         []byte
+	cur         segmentSink // 상시 회전 세그먼트 (continuous/both)
+	curSeg      *Segment
+	openWall    int64
+	openPTS     int64
+	lastPTS     int64
 	pendDiscont bool
-	rejected bool
-	closed   bool
+	rejected    bool
+	closed      bool
 
 	// 이벤트 클립 (event/both)
 	eventCapable bool
 	ring         []ringAU
+	ringBytes    int64 // 링버퍼 대략적 바이트 합 (무한 성장 방지용 상한)
 	evSink       segmentSink
 	evSeg        *Segment
 	evOpenPTS    int64
@@ -113,7 +114,9 @@ func NewRecorder(cfg RecorderConfig) *Recorder {
 }
 
 // continuous는 상시 회전 세그먼트를 기록하는 모드인지 반환한다.
-func (r *Recorder) continuous() bool { return r.mode == camera.RecordContinuous || r.mode == camera.RecordBoth }
+func (r *Recorder) continuous() bool {
+	return r.mode == camera.RecordContinuous || r.mode == camera.RecordBoth
+}
 
 // SetMode는 녹화 모드를 동적으로 전환한다. 세션(RTSP)은 유지되며 열린 세그먼트만 정리한다.
 // 모드가 실제로 바뀌면 true를 반환한다.
@@ -133,6 +136,7 @@ func (r *Recorder) SetMode(mode string) bool {
 	if !r.eventCapable {
 		r.closeEvLocked()
 		r.ring = r.ring[:0]
+		r.ringBytes = 0
 	}
 	return true
 }
@@ -171,6 +175,7 @@ func (r *Recorder) OnGap() {
 	r.closeCurLocked()
 	r.closeEvLocked()
 	r.ring = r.ring[:0]
+	r.ringBytes = 0
 	r.pendDiscont = true
 }
 
@@ -290,6 +295,8 @@ func (r *Recorder) TriggerEvent(typ string) (int64, error) {
 				break
 			}
 		}
+		r.ring = r.ring[:0] // 링버퍼는 클립으로 소비됨 — ringBytes도 함께 초기화
+		r.ringBytes = 0
 	}
 	if r.evSeg.StartTS == 0 {
 		r.evSeg.StartTS = now
@@ -310,16 +317,30 @@ func (r *Recorder) Close() {
 }
 
 // ringAppendLocked는 AU를 링버퍼에 넣고 pre_roll 범위를 유지한다.
+// PTS 정체/역행 카메라(펌웨어 버그, RTP base 리셋)에서 링이 무한 성장하지 않게
+// 시간 기준 외에 개수·바이트 상한도 둔다.
 func (r *Recorder) ringAppendLocked(nalus [][]byte, pts, wall int64) {
 	cp := make([][]byte, len(nalus))
+	total := 0
 	for i, n := range nalus {
 		cp[i] = append([]byte(nil), n...)
+		total += len(n)
 	}
 	r.ring = append(r.ring, ringAU{nalus: cp, pts: pts, wall: wall})
-	for len(r.ring) > 1 && pts-r.ring[0].pts > r.preRollB {
+	r.ringBytes += int64(total)
+	for len(r.ring) > 1 && (pts-r.ring[0].pts > r.preRollB || r.ringBytes > ringMaxBytes || len(r.ring) > ringMaxAUs) {
+		for _, n := range r.ring[0].nalus {
+			r.ringBytes -= int64(len(n))
+		}
 		r.ring = r.ring[1:]
 	}
 }
+
+// 링버퍼 상한 — 30fps 10초 pre-roll은 약 900AU 수준이므로 충분한 여유다.
+const (
+	ringMaxAUs   = 3600      // 개수 상한 (2분 @30fps)
+	ringMaxBytes = 256 << 20 // 256MB 상한 (4K 고프레임 대비)
+)
 
 // closeCurLocked는 현재 상시 세그먼트를 닫고 segments 행을 INSERT한다.
 func (r *Recorder) closeCurLocked() {

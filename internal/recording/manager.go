@@ -55,8 +55,9 @@ type Manager struct {
 }
 
 type recSession struct {
-	rec    *Recorder
-	cancel context.CancelFunc
+	rec     *Recorder
+	cancel  context.CancelFunc
+	tapStop func() // 비동기 탭 드레인+종료 (stopLocked에서 rec.Close 전 호출)
 
 	subMu     sync.Mutex
 	subCancel func() // supervise의 허브 구독 해제 (stop 시 RTSP 세션 해제를 위해 필요)
@@ -371,11 +372,66 @@ func (m *Manager) addRecorder(c camera.Camera) {
 			wasRunning = true
 		}
 	}
-	m.hub.SetNALUTap(c.ID, rec.OnNALU)
+	// 탭을 비동기로 감싼다 — 세그먼트 회전 시 Statfs/MkdirAll/DB INSERT 같은 느린 I/O가
+	// RTP 수신 스레드를 블로킹해 라이브 배포가 버스트로 끊기는 것을 막는다.
+	// 큐는 유계이며 포화 시 AU를 드롭한다(녹화 프레임 유실 < 라이브 지연).
+	tap, tapStop := asyncTap(rec.OnNALU)
+	sess.tapStop = tapStop
+	m.hub.SetNALUTap(c.ID, tap)
 	if wasRunning {
 		m.hub.Reload(c.ID) // 탭 없이 돌던 세션을 재다이얼해 NALU 탭 반영
 	}
 	go m.supervise(ctx, c.ID, rec, sess)
+}
+
+// asyncTap은 NALU 탭을 유계 큐 뒤의 전용 goroutine으로 실행한다.
+// stop은 큐를 모두 소비한 뒤 반환한다 — rec.Close() 전에 호출해야 세그먼트 꼬리가
+// 유실되지 않는다. stop 전에 탭을 먼저 해제해야 한다(해제 후 유입 없음을 보장).
+func asyncTap(onNALU stream.NALUTap) (stream.NALUTap, func()) {
+	type auCall struct {
+		codec stream.Codec
+		nalus [][]byte
+		pts   int64
+		key   bool
+	}
+	ch := make(chan auCall, 512)
+	stopCh := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case ev := <-ch:
+				onNALU(ev.codec, ev.nalus, ev.pts, ev.key)
+			case <-stopCh:
+				for { // 드레인 — 남은 AU를 모두 기록하고 종료
+					select {
+					case ev := <-ch:
+						onNALU(ev.codec, ev.nalus, ev.pts, ev.key)
+					default:
+						return
+					}
+				}
+			}
+		}
+	}()
+	tap := func(codec stream.Codec, nalus [][]byte, pts int64, key bool) {
+		// 비동기 소비이므로 enqueue 시점에 복사해야 한다 — 발신 측(gortsplib)은
+		// 콜백 반환 후 패킷 버퍼를 재활용할 수 있다.
+		cp := make([][]byte, len(nalus))
+		for i, n := range nalus {
+			cp[i] = append([]byte(nil), n...)
+		}
+		select {
+		case ch <- auCall{codec: codec, nalus: cp, pts: pts, key: key}:
+		default:
+			// 녹화 큐 포화 — 디스크/DB 병목. AU 1개 드롭은 세그먼트 1프레임 유실이다.
+		}
+	}
+	return tap, func() {
+		close(stopCh)
+		<-done
+	}
 }
 
 // supervise는 녹화 세션을 24/7 유지한다 — 구독 채널이 닫히면 백오프 후 재구독한다.
@@ -456,9 +512,12 @@ func (m *Manager) stopLocked(id string) {
 		return
 	}
 	delete(m.sessions, id)
-	s.cancel()        // supervise가 구독을 해제하고 종료한다 (백오프 대기 중이어도)
-	s.releaseSub()    // 채널 drain 전이라도 즉시 해제 (멱등)
+	s.cancel()     // supervise가 구독을 해제하고 종료한다 (백오프 대기 중이어도)
+	s.releaseSub() // 채널 drain 전이라도 즉시 해제 (멱등)
 	m.hub.SetNALUTap(id, nil)
+	if s.tapStop != nil {
+		s.tapStop() // 큐에 남은 AU를 모두 기록한 뒤 반환
+	}
 	s.rec.Close()
 }
 

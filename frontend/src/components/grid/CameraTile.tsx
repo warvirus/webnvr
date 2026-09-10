@@ -4,7 +4,7 @@ import {CameraDTO} from '../../types/api';
 import {StreamState, StreamStats} from '../../types';
 import {VideoRenderer} from './VideoRenderer';
 import {IconCamera} from '../common/Icons';
-import {useStreamStore} from '../../store/streamStore';
+import {useStreamStore, frameListenerAdded, frameListenerRemoved} from '../../store/streamStore';
 import {Sparkline} from '../stats/Sparkline';
 
 interface Props {
@@ -21,6 +21,8 @@ interface Props {
 
 // subscribeFrames는 디코더(메인 스레드)의 프레임 이벤트 중 해당 카메라의 것만 구독한다.
 // v1.1: Worker가 제거되어 디코더가 메인 스레드에서 CustomEvent로 프레임을 발행한다.
+// 구독 등록/해제를 streamStore 레지스트리에 기록한다 — 구독자가 없는 카메라의
+// VideoFrame은 허브가 즉시 close한다(숨김 채널 GPU 메모리 방지).
 function subscribeFrames(
   cameraId: string,
   onFrame: (frame: VideoFrame) => void,
@@ -31,8 +33,12 @@ function subscribeFrames(
       onFrame(detail.frame);
     }
   };
+  frameListenerAdded(cameraId);
   window.addEventListener('webnvr-frame', handler);
-  return () => window.removeEventListener('webnvr-frame', handler);
+  return () => {
+    frameListenerRemoved(cameraId);
+    window.removeEventListener('webnvr-frame', handler);
+  };
 }
 
 export function CameraTile({camera, channel, state, stats, retryCount = 0, selected, active, onSelect, onDoubleClick}: Props) {

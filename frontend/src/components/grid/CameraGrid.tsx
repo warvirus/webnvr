@@ -57,6 +57,7 @@ export function CameraGrid({cameras, states, stats, desired, retries, selectedId
           channel={offset + i + 1}
           state={states[cam.id] ?? 'idle'}
           stats={stats[cam.id]}
+          retryCount={retries[cam.id] ?? 0}
           selected={selectedId === cam.id}
           active={i < slots}
           onSelect={() => onSelect(cam.id)}

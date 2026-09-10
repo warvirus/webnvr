@@ -148,7 +148,15 @@ export function PlaybackPage() {
       hls.loadSource(url);
       hls.attachMedia(video);
       hls.on(Hls.Events.ERROR, (_e, data) => {
-        if (data.fatal) pushToast('error', `재생 오류: ${data.details}`);
+        if (!data.fatal) return;
+        // fatal 오류도 유형별 자가 복구를 시도한다 — 복구 없으면 플레이어가 죽은 채 유지된다
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          hls.startLoad();
+        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          hls.recoverMediaError();
+        } else {
+          pushToast('error', `재생 오류: ${data.details}`);
+        }
       });
       hlsRef.current = hls;
     } else {
@@ -248,7 +256,9 @@ export function PlaybackPage() {
     loadOverview();
     const video = videoRef.current;
     if (!video || !seekTs || !tl || tl.segments.length === 0) return;
-    const atEnd = video.ended || video.duration > 0 && (video.duration - video.currentTime) * 1000 <= LIVE_CATCHUP_MS;
+    // 일시정지 중에는 이어받기를 하지 않는다 — 60초마다 사용자의 일시정지가 풀리는 문제 방지
+    const atEnd = !video.paused && !video.seeking &&
+      (video.ended || video.duration > 0 && (video.duration - video.currentTime) * 1000 <= LIVE_CATCHUP_MS);
     if (atEnd) {
       // 현재 재생 위치(벽시계)에서 이어받기 — 새로 녹화된 세그먼트가 플레이리스트에 포함된다
       const wallTs = playBaseRef.current !== null
@@ -292,7 +302,9 @@ export function PlaybackPage() {
           else { el.style.display = 'block'; el.style.left = `${pos}%`; }
         }
       }
-      setNowLabel(active ? fmtTime(base! + video.currentTime * 1000) : '');
+      // 라벨은 초 단위로 바뀔 때만 setState — timeupdate(약 4Hz)마다 페이지 전체 리렌더 방지
+      const nextLabel = active ? fmtTime(base! + video.currentTime * 1000) : '';
+      setNowLabel(prev => prev === nextLabel ? prev : nextLabel);
     };
     tick();
     video.addEventListener('timeupdate', tick);
@@ -340,13 +352,19 @@ export function PlaybackPage() {
     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     if (!d || d.moved) return; // 드래그였으면 클릭(seek) 아님
     // 클릭 → 해당 시각의 세그먼트 seek (윈도우 좌표 기준)
+    // 세그먼트 내부 클릭은 그 시각부터 정밀 재생, 공백 클릭은 다음 구간 시작부터 재생한다
     if (!hasRecording || !trackRef.current) return;
     const rect = trackRef.current.getBoundingClientRect();
     const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
     const ts = dayStart + viewOffset + ratio * viewSpan;
-    const segs = (tl?.segments ?? []).filter(s => s.startTs + s.durMs >= ts);
-    if (segs.length === 0) return;
-    seek(segs[0].startTs);
+    const segs = tl?.segments ?? [];
+    const containing = segs.find(s => s.startTs <= ts && ts < s.startTs + Math.max(s.durMs, 1000));
+    if (containing) {
+      seek(ts);
+      return;
+    }
+    const next = segs.find(s => s.startTs >= ts);
+    if (next) seek(next.startTs);
   };
 
   const dayEnd = dayStart + DAY_MS;

@@ -144,8 +144,8 @@ type CameraService struct {
 	appCfg     *config.AppConfig
 	configDir  string
 	database   *db.DB
-	notifier   changeBroadcaster   // App 조립 시 주입(nil 허용 — 헤드리스 도구/유닛 테스트)
-	recManager *recording.Manager  // 녹화 매니저 — mutation/설정 변경 즉시 반영용(nil 허용)
+	notifier   changeBroadcaster  // App 조립 시 주입(nil 허용 — 헤드리스 도구/유닛 테스트)
+	recManager *recording.Manager // 녹화 매니저 — mutation/설정 변경 즉시 반영용(nil 허용)
 }
 
 // SetConfigDir는 설정 디렉토리를 지정한다. (App 조립 시 호출)
@@ -458,22 +458,14 @@ func redactedURL(raw string) string {
 }
 
 // RestoreBackup은 백업으로 카메라 목록을 대체한다. 비밀번호는 백업에 없으므로 재입력이 필요하다.
+// 먼저 백업 내용을 전부 생성한 뒤 기존 카메라를 지운다 — 생성이 실패하면 롤백해
+// 기존 목록을 보존한다(기존 삭제 후 순차 생성이면 중간 실패 시 카메라가 소실된다).
 func (s *CameraService) RestoreBackup(backup BackupFile) (int, error) {
 	if backup.Version != 1 {
 		return 0, fmt.Errorf("지원하지 않는 백업 버전: %d", backup.Version)
 	}
-	// 기존 카메라 전체 삭제
-	existing, err := s.ListCameras()
-	if err != nil {
-		return 0, err
-	}
-	for _, c := range existing {
-		if err := s.mgr.Delete(c.ID); err != nil {
-			return 0, err
-		}
-	}
-	// 백업 복원 (비밀번호 제외)
-	added := 0
+	// 1) 백업 복원 (비밀번호 제외) — 실패 시 지금까지 만든 것을 지우고 중단
+	created := make([]string, 0, len(backup.Cameras))
 	for _, dto := range backup.Cameras {
 		req := camera.CreateRequest{
 			Name:         dto.Name,
@@ -489,17 +481,40 @@ func (s *CameraService) RestoreBackup(backup BackupFile) (int, error) {
 		}
 		saved, err := s.mgr.Create(req)
 		if err != nil {
-			return added, fmt.Errorf("복원 실패 (%s): %w", dto.Name, err)
+			for _, id := range created {
+				_ = s.mgr.Delete(id)
+			}
+			return 0, fmt.Errorf("복원 실패 (%s): %w", dto.Name, err)
 		}
 		// 순서/사용여부 복원 (ID는 신규 발급 — 프론트가 전체 재조회)
 		enabled := dto.Enabled
 		if _, err := s.mgr.Update(saved.ID, camera.UpdateRequest{Enabled: &enabled}); err != nil {
-			return added, err
+			for _, id := range created {
+				_ = s.mgr.Delete(id)
+			}
+			return 0, err
 		}
-		added++
+		created = append(created, saved.ID)
+	}
+	// 2) 기존 카메라 삭제 — 방금 복원한 것은 제외
+	existing, err := s.ListCameras()
+	if err != nil {
+		return 0, err
+	}
+	createdSet := make(map[string]bool, len(created))
+	for _, id := range created {
+		createdSet[id] = true
+	}
+	for _, c := range existing {
+		if createdSet[c.ID] {
+			continue
+		}
+		if err := s.mgr.Delete(c.ID); err != nil {
+			return 0, err
+		}
 	}
 	s.notifyCameras("restored", "")
-	return added, nil
+	return len(created), nil
 }
 
 // SecurityStatusOf는 현재 보안 상태를 반환한다.
