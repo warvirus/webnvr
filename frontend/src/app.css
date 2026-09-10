@@ -939,6 +939,7 @@ input, select { font-family: inherit; }
   top: calc(100% + 6px);
   left: 0;
   z-index: 50;
+  width: 360px; /* 좌측 컬럼(~290px)보다 크게 — 오버레이라 우측으로 흘린다 */
   background: var(--panel, #16202c);
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 8px;
@@ -948,7 +949,22 @@ input, select { font-family: inherit; }
   border: none;
   background: none;
   margin-top: 0;
+  width: 100%;
+  max-width: none;
+  padding: 14px;
 }
+/* 오버레이 달력 확대 — 셀·글자 스케일 업 (사용자 요구: 조금 더 크게) */
+.cal-pop .rec-cal-grid { gap: 3px; }
+.cal-pop .rec-cal-week { margin-bottom: 6px; }
+.cal-pop .rec-cal-wd { font-size: 12px; padding: 4px 0; }
+.cal-pop .rec-cal-month { font-size: 15px; }
+.cal-pop .rec-cal-cell {
+  min-height: 54px;
+  padding: 7px 2px 6px;
+  border-radius: 7px;
+}
+.cal-pop .rec-cal-day { font-size: 14px; }
+.cal-pop .rec-cal-badge { font-size: 10px; }
 
 /* ── 영상 검색: 줌 컨트롤 + 재생 커서 + 컴팩트 메시지 ── */
 .tl-toolbar {
