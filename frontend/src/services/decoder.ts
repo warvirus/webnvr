@@ -165,6 +165,9 @@ export class Session {
   frameNalus: Uint8Array[] = [];
   frameTs = -1;
   frameIsKey = false;
+  // RTP 32비트 타임스탬프 랩 보정 상태 — 90kHz 기준 약 13.25시간마다 원점으로 되돌아온다.
+  tsLastRaw = -1;
+  tsUnwrapped = 0;
   // 스트림에서 수집한 파라미터 셋 (config가 비어 있을 때 사용)
   streamSps: Uint8Array | null = null;
   streamPps: Uint8Array | null = null;
@@ -409,21 +412,38 @@ export class Session {
     }
   }
 
+  // unwrapTs는 32비트 RTP ts를 단조 증가로 확장한다. int32 차이 정규화 —
+  // 작은 역행(순서 뒤집힘)은 그대로 두고, 원점 회귀(랩)는 자동 보정한다.
+  private unwrapTs(raw: number): number {
+    if (this.tsLastRaw < 0) {
+      this.tsLastRaw = raw;
+      this.tsUnwrapped = raw;
+      return raw;
+    }
+    let delta = raw - this.tsLastRaw;
+    if (delta > 0x7fffffff) delta -= 0x100000000;
+    else if (delta < -0x80000000) delta += 0x100000000;
+    this.tsUnwrapped += delta;
+    this.tsLastRaw = raw;
+    return this.tsUnwrapped;
+  }
+
   // processPacket은 RTP 페이로드를 디페이즈해 NALU로 누적한다.
   private processPacket(p: PacketIn) {
     const codec = this.config?.codec ?? 'h264';
     const nalus = this.depacketize(codec, p.payload);
     if (nalus === null) return; // FU 조각 진행 중
 
+    const pts = this.unwrapTs(p.ts);
     for (const n of nalus) {
       if (isParamSet(codec, n)) {
         this.collectParamSet(codec, n);
         continue; // 파라미터 셋은 프레임에 포함하지 않고 별도 저장
       }
-      if (p.ts !== this.frameTs && this.frameNalus.length > 0) {
+      if (pts !== this.frameTs && this.frameNalus.length > 0) {
         this.completeFrame();
       }
-      this.frameTs = p.ts;
+      this.frameTs = pts;
       if (isKeyframeNalu(codec, n)) this.frameIsKey = true;
       this.frameNalus.push(n);
     }

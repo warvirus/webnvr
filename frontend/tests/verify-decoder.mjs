@@ -30,7 +30,9 @@ class FakeDecoder {
   close() { this.state = 'closed'; }
 }
 globalThis.VideoDecoder = FakeDecoder;
-globalThis.EncodedVideoChunk = class { constructor(o) { Object.assign(this, o); } };
+// 제출된 청크 타임스탬프 기록 — 랩 시나리오의 단조 증가 검증용
+const chunkLog = [];
+globalThis.EncodedVideoChunk = class { constructor(o) { chunkLog.push(o.timestamp); Object.assign(this, o); } };
 
 let nowMs = 0;
 globalThis.performance = {now: () => nowMs};
@@ -133,6 +135,33 @@ function check(name, cond, extra = '') {
     check('오류 0건 (복구)', log.error.length === 0, JSON.stringify(log.error));
     runScenario4();
   }, 50);
+}
+
+// ── 시나리오 5: RTP 32비트 타임스탬프 랩 — 청크 ts가 역행하지 않는다 ──
+{
+  console.log('시나리오 5: RTP 타임스탬프 랩');
+  decoderBehavior = 'ok';
+  const {log, ev} = makeEvents();
+  const s = new Session('cam-f', ev);
+  s.config = {codec: 'h264', sps: '', pps: '', vps: '', clockRate: 90000};
+  const W = 0x100000000;
+  chunkLog.length = 0;
+  let seq = 0;
+  const frame = (ts) => {
+    s.push({seq: seq++, ts, marker: false, payload: STAP_A_KEY});
+    s.push({seq: seq++, ts, marker: false, payload: fuA(IDR_P1, true, false)});
+    s.push({seq: seq++, ts, marker: true, payload: fuA(IDR_P2, false, true)});
+  };
+  frame(W - 3000); // 랩 직전 키프레임
+  frame(0);        // 랩 발생 — raw 0 (실제 +3000)
+  frame(3000);
+  frame(6000);
+  nowMs += 200; s.flush();
+  check('랩 후 프레임 제출됨', s.frames >= 4, `frames=${s.frames}`);
+  check('랩 후 오류 0건', log.error.length === 0, JSON.stringify(log.error));
+  const mine = chunkLog.slice(-4);
+  const mono = mine.every((t, i) => i === 0 || t > mine[i - 1]);
+  check('청크 타임스탬프 단조 증가', mono, JSON.stringify(mine));
 }
 
 // ── 시나리오 4: 세션 재시작 반복 — 알림 스팸 없음 + 카메라별 포맷 기억 ──
