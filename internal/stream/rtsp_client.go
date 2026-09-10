@@ -12,6 +12,7 @@ import (
 	"github.com/bluenviron/gortsplib/v4/pkg/description"
 	"github.com/bluenviron/gortsplib/v4/pkg/format"
 	"github.com/bluenviron/mediacommon/v2/pkg/codecs/h264"
+	"github.com/bluenviron/mediacommon/v2/pkg/codecs/h265"
 	"github.com/pion/rtp"
 )
 
@@ -289,7 +290,13 @@ func dimensionsOf(codec Codec, sps []byte) (int, int) {
 			return 0, 0
 		}
 		return s.Width(), s.Height()
+	case CodecH265:
+		var s h265.SPS
+		if err := s.Unmarshal(sps); err != nil {
+			return 0, 0
+		}
+		return s.Width(), s.Height()
 	default:
-		return 0, 0 // H.265 SPS 파싱은 필요 시 확장
+		return 0, 0
 	}
 }
