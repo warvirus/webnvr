@@ -112,10 +112,25 @@ func TestRecordingsTimelineAndPlaylist(t *testing.T) {
 	}
 }
 
+// TestRecordingsPlaylistFloatRange — 타임라인 클릭 좌표에서 생긴 실수 from/to가
+// 400이 아니라 정상 처리되어야 한다(버림 변환). 회귀: ParseInt가 소수점을 거부해
+// 영상이 안 나오던 문제.
+func TestRecordingsPlaylistFloatRange(t *testing.T) {
+	app, srv := newTestAppFull(t)
+	seedRecording(t, app, "cam-rec-1", 1_000_000)
+	res, err := http.Get(srv.URL + "/api/recordings/cam-rec-1/playlist.m3u8?from=1000000.5&to=9000000000000.25")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("float from/to status = %d, want 200", res.StatusCode)
+	}
+}
+
 func TestRecordingsOverview(t *testing.T) {
 	app, srv := newTestAppFull(t)
 	seedRecording(t, app, "cam-rec-1", 1_000_000)
-
 	status, raw := doJSON(t, http.MethodGet, srv.URL+"/api/recordings/overview?from=0&to=9000000000000", nil)
 	if status != 200 {
 		t.Fatalf("overview status=%d", status)

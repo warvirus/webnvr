@@ -3,6 +3,7 @@ package api
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -116,16 +117,16 @@ func rangeParams(r *http.Request) (int64, int64, *httpError) {
 	now := time.Now().UnixMilli()
 	to := now
 	if v := r.URL.Query().Get("to"); v != "" {
-		n, err := strconv.ParseInt(v, 10, 64)
-		if err != nil {
+		n, ok := parseMS(v)
+		if !ok {
 			return 0, 0, errBadReq("to 파라미터가 잘못되었습니다")
 		}
 		to = n
 	}
 	from := to - 24*60*60*1000
 	if v := r.URL.Query().Get("from"); v != "" {
-		n, err := strconv.ParseInt(v, 10, 64)
-		if err != nil {
+		n, ok := parseMS(v)
+		if !ok {
 			return 0, 0, errBadReq("from 파라미터가 잘못되었습니다")
 		}
 		from = n
@@ -134,6 +135,20 @@ func rangeParams(r *http.Request) (int64, int64, *httpError) {
 		return 0, 0, errBadReq("from이 to보다 큽니다")
 	}
 	return from, to, nil
+}
+
+// parseMS는 epoch ms 쿼리값을 해석한다. 정수뿐 아니라 클라이언트가 보낼 수 있는
+// 실수 표기(1757398000.5)도 받아 버림 변환한다 — 타임라인 클릭 좌표처럼 화면
+// 비율 계산에서 생긴 값이 그대로 URL에 실리는 경우를 견디기 위한 방어선.
+func parseMS(v string) (int64, bool) {
+	if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+		return n, true
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0, false
+	}
+	return int64(f), true
 }
 
 // CamOverviewDTO는 전 카메라 요약의 항목이다.

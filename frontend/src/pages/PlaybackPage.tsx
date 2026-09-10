@@ -199,9 +199,12 @@ export function PlaybackPage() {
     }
   }, []);
 
+  // seek는 재생 시작점(epoch ms)을 확립한다 — 클릭 좌표나 이어받기 계산값은 실수라
+  // 반드시 반올림해 URL(from=)과 재생 위치에 정수 ms만 흐르게 한다 (백엔드 ParseInt 호환).
   const seek = useCallback((ts: number) => {
-    setSeekTs(ts);
-    startPlayback(ts);
+    const ms = Math.round(ts);
+    setSeekTs(ms);
+    startPlayback(ms);
   }, [startPlayback]);
 
   // ── 자동 표시: 타임라인 로드 후 autoPlayRef 요청 처리 (1-1~1-4) ──
