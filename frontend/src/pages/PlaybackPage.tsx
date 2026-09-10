@@ -437,8 +437,10 @@ export function PlaybackPage() {
       <section className="discovery playback-left" aria-label="영상 검색">
         <div className="discovery-head">
           <span className="discovery-hint" style={{marginLeft: 0}}>
-            {/* fmtDay(dayStart) */} 녹화 {dayWithRec ? `${overview.size}대 · ${fmtBytes(totalDayBytes)}` : '없음'}
-            {status && <>{' · '}전체 사용량 {fmtBytes(status.usedBytes)} · 녹화 중 {status.recording.length}대</>}
+            {/* { fmtDay(dayStart) } 녹화 {dayWithRec ? `${overview.size}대 · ${fmtBytes(totalDayBytes)}` : '없음'} */}
+            {/* {dayWithRec ? `${overview.size}대 · ${fmtBytes(totalDayBytes)}` : '없음'} */}
+            {/* {status && <>{' · '}전체 사용량 {fmtBytes(status.usedBytes)} · 녹화 중 {status.recording.length}대</>} */}
+            {status && <> 전체 사용량 {fmtBytes(status.usedBytes)} · 녹화 중 {status.recording.length}대</>}
           </span>
         </div>
 
@@ -508,7 +510,7 @@ export function PlaybackPage() {
       <section className="discovery playback-right" aria-label="재생">
         {/* 줌 컨트롤 + 타임라인 (2-1 휠 줌/드래그 팬, 2-2 붉은 커서) */}
         <div className="tl-toolbar">
-          <span className="tl-zoom-label">{zoomed ? `윈도우 ${fmtSpan(viewSpan)} · 실제 녹화 ${fmtDur(winDur)}` : '전체 24시간'}</span>
+          <span className="tl-zoom-label">{zoomed ? `윈도우 ${fmtSpan(viewSpan)} · 실제 녹화 ${fmtDur(winDur)} ` : '전체 24시간'}</span>
           {zoomed && (
             <button type="button" className="btn" onClick={() => { setViewSpan(DAY_MS); setViewOffset(0); }}>
               전체(24시간)
@@ -568,6 +570,7 @@ export function PlaybackPage() {
 
         <div className="discovery-head">
           <h3>{selectedCam ? `${selectedCam.name}` : ''}</h3>
+
           {hasRecording && (
             <button className="btn btn-primary" disabled={!camId}
               onClick={() => seek(ranges[0].fromMs)}>

@@ -894,8 +894,9 @@ input, select { font-family: inherit; }
 
 /* ── 영상 검색 좌/우 2컬럼 레이아웃 ─────────────────────────
    좌 = 녹화 현황(날짜/달력/채널 목록), 우 = 타임라인+재생.
-   좌측 폭은 날짜 행(달력+새로고침) 내용에 맞춘다 — 카메라 박스 끝선이
-   새로고침 버튼 끝선과 정렬된다. */
+   좌측 박스 폭 = 날짜 행(달력 네비+새로고침)의 내용 폭 — 카메라 박스 끝선이
+   새로고침 버튼 끝선과 정렬된다. 힌트/카드 목록은 width 0 + min-width 100%
+   트릭으로 폭 계산에서 빠지고(기여 0) 최종 폭만 채운다. */
 .playback-layout {
   display: grid;
   grid-template-columns: fit-content(320px) minmax(0, 1fr);
@@ -904,6 +905,16 @@ input, select { font-family: inherit; }
   width: 100%;
 }
 .playback-left { min-height: 0; }
+.playback-left .discovery-head { display: block; }
+.playback-left .discovery-hint {
+  display: block;
+  width: 0;
+  min-width: 100%;
+}
+.playback-left .cam-picker {
+  width: 0;
+  min-width: 100%;
+}
 .playback-right { min-width: 0; }
 @media (max-width: 1100px) {
   .playback-layout { grid-template-columns: 1fr; }
@@ -918,7 +929,7 @@ input, select { font-family: inherit; }
   min-width: max-content; /* 컬럼 폭의 기준 — 새로고침까지 한 줄 유지 */
 }
 .date-row > .btn:last-child {
-  margin-left: auto; /* 새로고침을 박스 끝선에 정렬 */
+  margin-left: auto; /* 폭이 남으면 끝선 정렬(보통 내용 폭과 같아져 인접한다) */
 }
 .date-anchor {
   position: relative; /* 달력 팝업의 기준점 */
