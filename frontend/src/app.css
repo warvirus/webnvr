@@ -896,7 +896,7 @@ input, select { font-family: inherit; }
    좌 = 녹화 현황(날짜/달력/채널 목록), 우 = 타임라인+재생. */
 .playback-layout {
   display: grid;
-  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  grid-template-columns: minmax(250px, 300px) minmax(0, 1fr);
   align-items: start;
   gap: 18px;
   width: 100%;

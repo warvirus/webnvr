@@ -419,7 +419,7 @@ export function PlaybackPage() {
       <section className="discovery playback-left" aria-label="영상 검색">
         <div className="discovery-head">
           <span className="discovery-hint" style={{marginLeft: 0}}>
-            {fmtDay(dayStart)} 녹화 {dayWithRec ? `${overview.size}대 · ${fmtBytes(totalDayBytes)}` : '없음'}
+            {/* fmtDay(dayStart) */} 녹화 {dayWithRec ? `${overview.size}대 · ${fmtBytes(totalDayBytes)}` : '없음'}
             {status && <>{' · '}전체 사용량 {fmtBytes(status.usedBytes)} · 녹화 중 {status.recording.length}대</>}
           </span>
         </div>
