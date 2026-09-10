@@ -131,14 +131,15 @@ func (j *Janitor) Sweep() {
 			if j.tooRecent(s) || j.isRecording(s.CameraID) && j.isNewestFor(s) {
 				continue
 			}
-			j.delete(s)
-			deleted++
+			if j.delete(s) {
+				deleted++
+			}
 			if !j.over(true) {
 				return
 			}
 		}
 		if deleted == 0 {
-			slog.Warn("janitor: 삭제 가능한 세그먼트 없음 (전부 보호됨) — 용량 목표 미달")
+			slog.Warn("janitor: 삭제 가능한 세그먼트 없음 (전부 보호되거나 삭제 실패) — 용량 목표 미달")
 			return
 		}
 	}
@@ -184,20 +185,23 @@ func (j *Janitor) isNewestFor(s Segment) bool {
 	return err == nil && len(rows) == 0
 }
 
-func (j *Janitor) delete(s Segment) {
+func (j *Janitor) delete(s Segment) bool {
 	root, err := j.pool.Root(s.StorageIdx)
 	if err != nil {
 		slog.Error("janitor: 스토리지 해석 실패", "storage_idx", s.StorageIdx, "err", err)
-		return
+		return false
 	}
 	if err := os.Remove(filepath.Join(root, filepath.FromSlash(s.RelPath))); err != nil && !os.IsNotExist(err) {
-		slog.Warn("janitor: 파일 삭제 실패", "path", s.RelPath, "err", err)
+		// 파일이 남으면 발자국 재계산이 틀어지므로 행도 남겨 재시도한다.
+		slog.Warn("janitor: 파일 삭제 실패 — 행 유지 후 재시도", "path", s.RelPath, "err", err)
+		return false
 	}
 	if err := j.store.Delete(s.ID); err != nil {
 		slog.Error("janitor: segments 행 삭제 실패", "id", s.ID, "err", err)
-		return
+		return false
 	}
 	slog.Info("janitor: 세그먼트 삭제", "camera", s.CameraID, "path", s.RelPath, "bytes", s.Bytes, "start_ts", s.StartTS)
+	return true
 }
 
 // freePercentFn은 테스트에서 교체 가능한 디스크 여유 프로버다.

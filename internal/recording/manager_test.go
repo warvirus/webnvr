@@ -2,6 +2,8 @@ package recording
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -264,4 +266,45 @@ func TestManagerNotifiesOnSessionChange(t *testing.T) {
 		t.Fatal("세션 제거 후 녹화 상태 브로드캐스트 없음")
 	}
 	m.Close()
+}
+
+// TestManagerSweepOrphans — 기동 시 DB 행이 없는 .ts 파일(크래시 유실분)을 정리한다.
+func TestManagerSweepOrphans(t *testing.T) {
+	_, _ = withFakeSink(t)
+	store := newTestStore(t)
+	hub := newFakeHub()
+	root := t.TempDir()
+	cfg := recCfg()
+	cfg.Storages[0].Path = root
+	m, _ := NewManager(cfg, store, hub, fakeCams{list: []camera.Camera{{ID: "cam-1", RecordMode: camera.RecordOff}}})
+
+	// 인덱스 있는 세그먼트(보존) + 고아 파일(삭제 대상) + 규칙에 안 맞는 파일(보존)
+	if _, err := store.Insert(Segment{CameraID: "cam-1", StartTS: 1000, DurMS: 500, StorageIdx: 0, RelPath: "cam-1/2026-09-10/10-00-00.ts", Bytes: 100, Codec: "h264"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "cam-1", "2026-09-10"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]bool{
+		filepath.Join(root, "cam-1", "2026-09-10", "10-00-00.ts"): true,  // 인덱스 있음 — 보존
+		filepath.Join(root, "cam-1", "2026-09-10", "10-00-31.ts"): false, // 고아 — 삭제
+		filepath.Join(root, "cam-1", "2026-09-10", "10-00-59.ts"): false, // 고아 — 삭제
+		filepath.Join(root, "notes.txt"):                          true,  // .ts 아님 — 보존
+	}
+	for f := range files {
+		if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	m.Start(context.Background())
+	m.Close()
+
+	for f, keep := range files {
+		_, err := os.Stat(f)
+		exists := !os.IsNotExist(err)
+		if exists != keep {
+			t.Errorf("%s: exists = %v, want %v", f, exists, keep)
+		}
+	}
 }

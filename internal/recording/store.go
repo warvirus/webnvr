@@ -81,6 +81,15 @@ func (s *Store) Oldest(limit int) ([]Segment, error) {
 	return collect(rows)
 }
 
+// All은 모든 세그먼트 행을 반환한다. (고아 스캔 등 유지보수 도구용)
+func (s *Store) All() ([]Segment, error) {
+	rows, err := s.db.Query(`SELECT ` + segCols + ` FROM segments`)
+	if err != nil {
+		return nil, err
+	}
+	return collect(rows)
+}
+
 // OlderThan은 start_ts가 cutoffMS 미만인 세그먼트 최대 limit개를 반환한다. (retention)
 func (s *Store) OlderThan(cutoffMS int64, limit int) ([]Segment, error) {
 	rows, err := s.db.Query(

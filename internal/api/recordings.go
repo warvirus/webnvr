@@ -225,6 +225,7 @@ func handleTimeline(w http.ResponseWriter, app *App, id string, from, to int64) 
 }
 
 // mergeRanges는 세그먼트 목록을 연속 구간으로 병합한다. 인접(간격 ≤ 1.5s)은 한 구간으로.
+// both 모드에서 이벤트 클립이 상시 구간 안에 겹치므로 구간은 단조 확장만 허용한다.
 func mergeRanges(segs []recording.Segment) []RecRange {
 	out := []RecRange{}
 	for _, s := range segs {
@@ -233,7 +234,9 @@ func mergeRanges(segs []recording.Segment) []RecRange {
 			end = s.StartTS + 1000
 		}
 		if n := len(out); n > 0 && s.StartTS-out[n-1].ToMS <= 1500 {
-			out[n-1].ToMS = end
+			if end > out[n-1].ToMS {
+				out[n-1].ToMS = end
+			}
 			out[n-1].Bytes += s.Bytes
 			out[n-1].Count++
 			continue

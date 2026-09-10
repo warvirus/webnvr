@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"sync"
 	"time"
 )
@@ -47,6 +48,7 @@ type activeStream struct {
 	subs   map[*subscriber]struct{}
 	info   Info
 	refs   int
+	closed bool // 구독자 정리(채널 close) 완료 — h.mu로 보호, 이중 close 방지
 	// 진단 통계
 	packetCount uint64
 	dropCount   uint64
@@ -102,11 +104,17 @@ func (h *Hub) Start(cameraID string) error {
 	rawURL, transport, err := h.src.StreamURL(cameraID)
 	if err != nil {
 		h.mu.Lock()
-		delete(h.streams, cameraID)
+		if cur, ok := h.streams[cameraID]; ok && cur == e {
+			delete(h.streams, cameraID)
+		}
 		h.mu.Unlock()
 		notifyFailed(h.src, cameraID)
 		slog.Error("❌ 스트림 URL 조회 실패", "camera", cameraID, "err", err)
+		h.closeGen(e, cameraID, false) // 조기 구독자 채널 정리
 		return fmt.Errorf("스트림 URL 조회 실패: %w", err)
+	}
+	if u, err := url.Parse(rawURL); err == nil {
+		rawURL = u.Redacted() // 자격증명 마스킹 후 로그 기록
 	}
 	slog.Info("✅ 스트림 URL 조회 성공", "camera", cameraID, "url", rawURL, "transport", transport)
 
@@ -143,7 +151,8 @@ func (h *Hub) Start(cameraID string) error {
 		if dialErr != nil && ctx.Err() == nil {
 			slog.Error("❌ RTSP 연결 실패", "camera", cameraID, "err", dialErr)
 		}
-		h.close(cameraID, ctx.Err() == nil)
+		// 자신이 시작한 세대만 정리한다 — 재시작이 겹쳐도 새 세션을 파괴하지 않는다.
+		h.closeGen(e, cameraID, ctx.Err() == nil)
 	}()
 
 	return nil
@@ -316,27 +325,50 @@ func (h *Hub) publish(cameraID string, ev Event) {
 	}
 }
 
-// close는 스트림을 정리하고 구독자에게 종료 이벤트를 전달한다.
+// close는 카메라의 현재 세션을 정리한다. (Reload 등 명시적 종료 경로)
 func (h *Hub) close(cameraID string, abnormal bool) {
 	h.mu.Lock()
 	e, ok := h.streams[cameraID]
-	if ok {
-		delete(h.streams, cameraID)
-	}
 	h.mu.Unlock()
 	if !ok {
 		return
 	}
-	if e.cancel != nil {
-		e.cancel()
+	h.closeGen(e, cameraID, abnormal)
+}
+
+// closeGen은 자신이 시작한 세대의 세션만 정리한다 (dial 고루틴 종료 경로).
+// 자신의 세대가 이미 맵에서 교체됐으면(closeSession에 의한 재시작) 새 세션을 건드리지
+// 않고 자기 세대의 구독자 채널만 닫는다 — ID 기반 정리가 새 세션을 파괴하는
+// 종료/재시작 경합을 막는다. 구독자 채널 close는 세션당 정확히 1회.
+func (h *Hub) closeGen(e *activeStream, cameraID string, abnormal bool) {
+	h.mu.Lock()
+	current := false
+	if cur, ok := h.streams[cameraID]; ok && cur == e {
+		delete(h.streams, cameraID)
+		current = true
 	}
-	if abnormal {
+	if e.closed {
+		h.mu.Unlock()
+		return
+	}
+	e.closed = true
+	h.mu.Unlock()
+
+	if e.cancel != nil {
+		e.cancel() // 멱등 — 교체 경로에서 이미 취소됐을 수 있다
+	}
+	if current && abnormal {
 		notifyFailed(h.src, cameraID)
 	}
 	reason := "정상 종료"
 	if abnormal {
 		reason = "연결 끊김"
 	}
+	h.detachSubs(e, reason)
+}
+
+// detachSubs는 세션의 구독자에게 종료 이벤트를 보내고 채널을 닫는다.
+func (h *Hub) detachSubs(e *activeStream, reason string) {
 	for s := range e.subs {
 		select {
 		case s.ch <- StoppedEvent{Reason: reason}:

@@ -435,12 +435,26 @@ func (s *CameraService) ExportBackup() (BackupFile, error) {
 	if err != nil {
 		return BackupFile{}, err
 	}
+	// stream_url에 포함된 자격증명도 마스킹한다 — 백업 파일은 자격증명 저장소가 아니다.
+	// (복원 시 직접 RTSP 카메라는 URL 자격증명 재입력이 필요하다)
+	for i := range cams {
+		cams[i].StreamURL = redactedURL(cams[i].StreamURL)
+	}
 	return BackupFile{
 		Version:    1,
 		ExportedAt: time.Now().UTC().Format(time.RFC3339),
 		Cameras:    cams,
 		AppConfig:  s.appCfg,
 	}, nil
+}
+
+// redactedURL은 URL의 비밀번호를 xxxx로 마스킹한다. 자격증명이 없거나 파싱 실패면 원본을 반환한다.
+func redactedURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.User == nil {
+		return raw
+	}
+	return u.Redacted()
 }
 
 // RestoreBackup은 백업으로 카메라 목록을 대체한다. 비밀번호는 백업에 없으므로 재입력이 필요하다.

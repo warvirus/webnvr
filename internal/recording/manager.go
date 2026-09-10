@@ -5,7 +5,11 @@ package recording
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,6 +57,27 @@ type Manager struct {
 type recSession struct {
 	rec    *Recorder
 	cancel context.CancelFunc
+
+	subMu     sync.Mutex
+	subCancel func() // supervise의 허브 구독 해제 (stop 시 RTSP 세션 해제를 위해 필요)
+}
+
+// setSubCancel은 supervise의 구독 해제 함수를 기록한다.
+func (s *recSession) setSubCancel(fn func()) {
+	s.subMu.Lock()
+	s.subCancel = fn
+	s.subMu.Unlock()
+}
+
+// releaseSub는 구독을 해제한다 (멱등).
+func (s *recSession) releaseSub() {
+	s.subMu.Lock()
+	fn := s.subCancel
+	s.subCancel = nil
+	s.subMu.Unlock()
+	if fn != nil {
+		fn()
+	}
 }
 
 // NewManager는 설정을 검증하고 스토리지 풀을 준비한다. enabled 여부와 무관하게
@@ -73,6 +98,7 @@ func NewManager(cfg config.RecordingConfig, store *Store, hub HubRef, cams Camer
 
 // Start는 녹화 대상 카메라의 녹화를 시작하고 janitor를 돌린다.
 func (m *Manager) Start(ctx context.Context) error {
+	m.sweepOrphans() // 크래시로 인덱스 행 없이 남은 파일 정리
 	if err := m.reconcile(); err != nil {
 		return err
 	}
@@ -82,6 +108,55 @@ func (m *Manager) Start(ctx context.Context) error {
 		"max_usage_gb", cfg.MaxUsageGB)
 	m.jan.Start(ctx)
 	return nil
+}
+
+// sweepOrphans는 스토리지를 스캔해 DB 행이 없는 .ts 파일(크래시 시 close 전
+// INSERT 누락분)을 삭제한다. 세그먼트는 close 시점에만 INSERT되므로 강제 종료 시
+// 파일만 남는데, 이대로 두면 재생 불가 + janitor가 지우지 못해 영구 누적된다.
+func (m *Manager) sweepOrphans() {
+	rows, err := m.store.All()
+	if err != nil {
+		slog.Warn("고아 스캔 생략 — segments 조회 실패", "err", err)
+		return
+	}
+	known := map[int]map[string]bool{} // storage_idx → rel_path 집합
+	for _, g := range rows {
+		if known[g.StorageIdx] == nil {
+			known[g.StorageIdx] = map[string]bool{}
+		}
+		known[g.StorageIdx][g.RelPath] = true
+	}
+	for i, r := range m.pool.Roots() {
+		removed, failed := 0, 0
+		err := filepath.WalkDir(r.Path, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil // 접근 불가 디렉토리는 건너뛴다
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".ts") {
+				return nil
+			}
+			rel, err := filepath.Rel(r.Path, path)
+			if err != nil {
+				return nil
+			}
+			if known[i][filepath.ToSlash(rel)] {
+				return nil
+			}
+			if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) {
+				failed++
+				return nil
+			}
+			removed++
+			return nil
+		})
+		if err != nil {
+			slog.Warn("고아 스캔 실패", "root", r.Path, "err", err)
+			continue
+		}
+		if removed > 0 || failed > 0 {
+			slog.Info("고아 세그먼트 정리", "root", r.Path, "removed", removed, "failed", failed)
+		}
+	}
 }
 
 // SetNotifier는 세션 변화 통지자를 주입한다. (App 조립 시, nil 허용)
@@ -286,7 +361,8 @@ func (m *Manager) addRecorder(c camera.Camera) {
 		Store:           m.store,
 	})
 	ctx, cancel := context.WithCancel(context.Background())
-	m.sessions[c.ID] = &recSession{rec: rec, cancel: cancel}
+	sess := &recSession{rec: rec, cancel: cancel}
+	m.sessions[c.ID] = sess
 	m.mu.Unlock()
 
 	wasRunning := false
@@ -299,11 +375,11 @@ func (m *Manager) addRecorder(c camera.Camera) {
 	if wasRunning {
 		m.hub.Reload(c.ID) // 탭 없이 돌던 세션을 재다이얼해 NALU 탭 반영
 	}
-	go m.supervise(ctx, c.ID, rec)
+	go m.supervise(ctx, c.ID, rec, sess)
 }
 
 // supervise는 녹화 세션을 24/7 유지한다 — 구독 채널이 닫히면 백오프 후 재구독한다.
-func (m *Manager) supervise(ctx context.Context, cameraID string, rec *Recorder) {
+func (m *Manager) supervise(ctx context.Context, cameraID string, rec *Recorder, sess *recSession) {
 	backoff := time.Second
 	for {
 		if ctx.Err() != nil {
@@ -320,16 +396,31 @@ func (m *Manager) supervise(ctx context.Context, cameraID string, rec *Recorder)
 			backoff = nextBackoff(backoff)
 			continue
 		}
+		sess.setSubCancel(cancelSub)
+		if ctx.Err() != nil { // 정지가 Subscribe와 경합 — 즉시 해제
+			sess.releaseSub()
+			return
+		}
 		backoff = time.Second
-		for ev := range ch {
-			switch e := ev.(type) {
-			case stream.StartedEvent:
-				rec.OnInfo(e.Info.Codec, e.Info.SPS, e.Info.PPS, e.Info.VPS)
-			case stream.StoppedEvent:
-				rec.OnGap()
+	drain:
+		for {
+			select {
+			case ev, ok := <-ch:
+				if !ok {
+					break drain
+				}
+				switch e := ev.(type) {
+				case stream.StartedEvent:
+					rec.OnInfo(e.Info.Codec, e.Info.SPS, e.Info.PPS, e.Info.VPS)
+				case stream.StoppedEvent:
+					rec.OnGap()
+				}
+			case <-ctx.Done():
+				sess.releaseSub() // 구독 해제 → 마지막 구독자면 RTSP 세션도 해제
+				return
 			}
 		}
-		cancelSub()
+		sess.releaseSub()
 		if ctx.Err() != nil {
 			return
 		}
@@ -365,7 +456,8 @@ func (m *Manager) stopLocked(id string) {
 		return
 	}
 	delete(m.sessions, id)
-	s.cancel()
+	s.cancel()        // supervise가 구독을 해제하고 종료한다 (백오프 대기 중이어도)
+	s.releaseSub()    // 채널 drain 전이라도 즉시 해제 (멱등)
 	m.hub.SetNALUTap(id, nil)
 	s.rec.Close()
 }

@@ -429,8 +429,14 @@ func (r *Recorder) openCurLocked(wallMS, pts int64) {
 func uniqueRel(root, rel string) (string, error) {
 	abs := filepath.Join(root, filepath.FromSlash(rel))
 	for i := 2; ; i++ {
-		if _, err := os.Stat(abs); os.IsNotExist(err) {
+		_, err := os.Stat(abs)
+		if err == nil {
+			// 충돌 — 접미사를 붙여 재시도
+		} else if os.IsNotExist(err) {
 			return rel, nil
+		} else {
+			// 권한/I/O 오류를 존재로 오판하면 무한 루프가 된다 — 즉시 실패
+			return "", fmt.Errorf("세그먼트 경로 확인 실패 (%s): %w", abs, err)
 		}
 		ext := filepath.Ext(rel)
 		rel = rel[:len(rel)-len(ext)] + "-" + strconv.Itoa(i) + ext

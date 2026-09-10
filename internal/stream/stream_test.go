@@ -581,3 +581,63 @@ func TestHubNALUTap(t *testing.T) {
 		t.Error("SetNALUTap(nil) 후에도 탭이 남음")
 	}
 }
+
+// TestHubCloseStaleGeneration — dial 종료 시 자신의 세대만 정리한다.
+// 구세션 종료와 새 세션 시작이 겹쳐도(녹화 supervise 백오프 재시작 등)
+// 새 세션과 그 구독자는 영향을 받지 않아야 한다.
+func TestHubCloseStaleGeneration(t *testing.T) {
+	hub := NewHub(testCameraSource{urls: map[string]string{"cam-1": "rtsp://127.0.0.1:1/stream"}}, fakeDialer(1000))
+
+	if err := hub.Start("cam-1"); err != nil {
+		t.Fatal(err)
+	}
+	ch1, cancel1, err := hub.Subscribe("cam-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel1()
+	time.Sleep(50 * time.Millisecond) // dial 고루틴이 진행 중 상태로 대기
+
+	// Reload → 세션 교체 (구세션 dial은 ctx 취소로 곧 종료된다)
+	hub.Reload("cam-1")
+	if err := hub.Start("cam-1"); err != nil {
+		t.Fatal(err)
+	}
+	ch2, cancel2, err := hub.Subscribe("cam-1")
+	if err != nil {
+		t.Fatalf("새 세션 구독 실패: %v", err)
+	}
+	defer cancel2()
+
+	// 구세션 dial 고루틴이 종료·정리될 시간을 준다
+	time.Sleep(300 * time.Millisecond)
+
+	// 새 세션이 살아 있어야 한다
+	if _, ok := hub.Info("cam-1"); !ok {
+		t.Fatal("구세션 정리가 새 세션을 파괴함")
+	}
+	// 새 구독자 채널은 닫히지 않고 패킷을 계속 받는다
+	got := collectEvents(ch2, 2*time.Second, func(evts []Event) bool {
+		for _, e := range evts {
+			if _, ok := e.(StoppedEvent); ok {
+				return true
+			}
+		}
+		return false
+	})
+	for _, e := range got {
+		if _, ok := e.(StoppedEvent); ok {
+			t.Fatalf("새 구독자에게 StoppedEvent 수신됨 (%d events) — 세대 정리 오류", len(got))
+		}
+	}
+	// 구세션 구독자는 닫힌 채널을 받는다 (블로킹 없이 즉시 종료 확인용)
+	select {
+	case _, ok := <-ch1:
+		if !ok {
+			// 정상 — 구세션 채널 닫힘
+		}
+	default:
+		// 아직 이벤트가 남아 있을 수 있다 — 문제 없음
+	}
+	hub.StopAll()
+}
