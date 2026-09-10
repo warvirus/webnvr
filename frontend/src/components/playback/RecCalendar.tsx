@@ -1,9 +1,10 @@
 // 다시보기용 월간 달력 — 녹화된 날짜를 마커로 표시하고 클릭으로 날짜를 선택한다
 import React, {useMemo} from 'react';
 import {DayCount} from '../../services/recordings';
+import {WEEKDAY_LABELS} from '../../services/locale';
 import {IconChevronLeft, IconChevronRight} from '../common/Icons';
 
-const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+const WEEKDAYS = WEEKDAY_LABELS;
 
 function dayKey(y: number, m: number, d: number): string {
   return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;

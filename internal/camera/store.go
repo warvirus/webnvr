@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,13 @@ import (
 
 // CurrentVersion은 cameras.json 스키마 버전이다.
 const CurrentVersion = 1
+
+// ErrNotFound는 카메라 ID 조회 실패의 센티널 오류다. 호출자는 errors.Is로 판별하고
+// 표시 메시지는 이를 감싸 만든다(메시지 문자열 매칭은 하지 않는다).
+var ErrNotFound = errors.New("카메라를 찾을 수 없음")
+
+// NotFound는 ErrNotFound를 ID 정보와 함께 감싸 반환한다.
+func NotFound(id string) error { return fmt.Errorf("%w: %s", ErrNotFound, id) }
 
 // Store는 카메라 영속화를 위한 인터페이스다. (Phase 6에서 SQLCameraStore로 교체 예정)
 type Store interface {
@@ -121,7 +129,7 @@ func (s *JSONCameraStore) Get(id string) (*Camera, error) {
 			return &c, nil
 		}
 	}
-	return nil, fmt.Errorf("카메라를 찾을 수 없음: %s", id)
+	return nil, NotFound(id)
 }
 
 // Add는 새 카메라를 저장하고 ID와 타임스탬프가 채워진 결과를 반환한다.
@@ -171,7 +179,7 @@ func (s *JSONCameraStore) Update(cam Camera) (*Camera, error) {
 			return &c, nil
 		}
 	}
-	return nil, fmt.Errorf("카메라를 찾을 수 없음: %s", cam.ID)
+	return nil, NotFound(cam.ID)
 }
 
 // Delete는 카메라를 제거하고 남은 카메라의 layout_order를 재정렬한다.
@@ -186,7 +194,7 @@ func (s *JSONCameraStore) Delete(id string) error {
 		}
 	}
 	if idx < 0 {
-		return fmt.Errorf("카메라를 찾을 수 없음: %s", id)
+		return NotFound(id)
 	}
 	s.file.Cameras = append(s.file.Cameras[:idx], s.file.Cameras[idx+1:]...)
 	for i := range s.file.Cameras {

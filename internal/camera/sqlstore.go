@@ -154,7 +154,7 @@ func (s *SQLCameraStore) Get(id string) (*Camera, error) {
 	row := s.db.QueryRow(`SELECT `+camColumns+` FROM cameras WHERE id=?`, id)
 	c, err := scanCamera(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("카메라를 찾을 수 없음: %s", id)
+		return nil, NotFound(id)
 	}
 	if err != nil {
 		return nil, err
@@ -196,7 +196,7 @@ func (s *SQLCameraStore) Update(cam Camera) (*Camera, error) {
 	var addedAt string
 	err := s.db.QueryRow(`SELECT added_at FROM cameras WHERE id=?`, cam.ID).Scan(&addedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("카메라를 찾을 수 없음: %s", cam.ID)
+		return nil, NotFound(cam.ID)
 	}
 	if err != nil {
 		return nil, err
@@ -234,7 +234,7 @@ func (s *SQLCameraStore) Delete(id string) error {
 		return err
 	}
 	if aff, _ := res.RowsAffected(); aff == 0 {
-		return fmt.Errorf("카메라를 찾을 수 없음: %s", id)
+		return NotFound(id)
 	}
 	if err := renumber(tx); err != nil {
 		return err

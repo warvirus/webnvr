@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"webnvr/internal/camera"
 )
 
 // httpError는 서비스 오류를 HTTP 상태 코드로 매핑한다.
@@ -28,6 +30,12 @@ func errNotFound(id string) *httpError {
 
 func errBadReq(msg string) *httpError {
 	return &httpError{status: http.StatusBadRequest, message: msg}
+}
+
+// methodNotAllowed는 405 응답에 표준 Allow 헤더를 실어 반환한다. (RFC 9110)
+func methodNotAllowed(w http.ResponseWriter, allow string) {
+	w.Header().Set("Allow", allow)
+	writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "허용하지 않는 메서드 (" + allow + ")"})
 }
 
 func errInternal(msg string) *httpError {
@@ -114,7 +122,7 @@ func decodeBody(r *http.Request, v any) *httpError {
 func RegisterHTTP(mux *http.ServeMux, app *App) {
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET만 허용"})
+			methodNotAllowed(w, "GET")
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "version": 1})
@@ -144,13 +152,13 @@ func RegisterHTTP(mux *http.ServeMux, app *App) {
 			writeJSON(w, http.StatusCreated, saved)
 
 		default:
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "허용하지 않는 메서드"})
+			methodNotAllowed(w, "GET, POST, PUT, DELETE")
 		}
 	})
 
 	mux.HandleFunc("/api/cameras/reorder", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST만 허용"})
+			methodNotAllowed(w, "POST")
 			return
 		}
 		var req struct {
@@ -169,7 +177,7 @@ func RegisterHTTP(mux *http.ServeMux, app *App) {
 
 	mux.HandleFunc("/api/cameras/discover", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST만 허용"})
+			methodNotAllowed(w, "POST")
 			return
 		}
 		found, err := app.Camera.DiscoverONVIFCameras()
@@ -182,7 +190,7 @@ func RegisterHTTP(mux *http.ServeMux, app *App) {
 
 	mux.HandleFunc("/api/cameras/test-onvif", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST만 허용"})
+			methodNotAllowed(w, "POST")
 			return
 		}
 		var req TestONVIFRequest
@@ -200,7 +208,7 @@ func RegisterHTTP(mux *http.ServeMux, app *App) {
 
 	mux.HandleFunc("/api/cameras/test-direct", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST만 허용"})
+			methodNotAllowed(w, "POST")
 			return
 		}
 		var req TestDirectStreamRequest
@@ -219,7 +227,7 @@ func RegisterHTTP(mux *http.ServeMux, app *App) {
 	// 미등록 카메라용 ONVIF 조회 — 본문으로 자격증명을 전달한다 (doc §5.1 자격증명 규칙)
 	mux.HandleFunc("/api/onvif/profiles", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST만 허용"})
+			methodNotAllowed(w, "POST")
 			return
 		}
 		var req GetProfilesRequest
@@ -237,7 +245,7 @@ func RegisterHTTP(mux *http.ServeMux, app *App) {
 
 	mux.HandleFunc("/api/security", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET만 허용"})
+			methodNotAllowed(w, "GET")
 			return
 		}
 		writeJSON(w, http.StatusOK, SecurityStatusOf())
@@ -249,7 +257,7 @@ func RegisterHTTP(mux *http.ServeMux, app *App) {
 			return
 		}
 		if r.Method != http.MethodPut {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET/PUT만 허용"})
+			methodNotAllowed(w, "GET, PUT")
 			return
 		}
 		var cfg map[string]any
@@ -268,7 +276,7 @@ func RegisterHTTP(mux *http.ServeMux, app *App) {
 	// 백업: 카메라 목록(비밀번호 제외) + 앱 설정을 하나의 JSON으로 내려준다.
 	mux.HandleFunc("/api/backup", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET만 허용"})
+			methodNotAllowed(w, "GET")
 			return
 		}
 		backup, err := app.Camera.ExportBackup()
@@ -282,7 +290,7 @@ func RegisterHTTP(mux *http.ServeMux, app *App) {
 	// 복원: 백업 JSON을 받아 카메라를 대체한다. 비밀번호는 백업에 없으므로 재입력이 필요하다.
 	mux.HandleFunc("/api/backup/restore", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST만 허용"})
+			methodNotAllowed(w, "POST")
 			return
 		}
 		var backup BackupFile
@@ -324,7 +332,7 @@ func RegisterHTTP(mux *http.ServeMux, app *App) {
 // cameraTriggerEvent는 POST /api/cameras/{id}/record/event를 처리한다. (R.4 수동 트리거)
 func cameraTriggerEvent(w http.ResponseWriter, r *http.Request, app *App, id string) {
 	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST만 허용"})
+		methodNotAllowed(w, "POST")
 		return
 	}
 	var req struct {
@@ -378,14 +386,14 @@ func cameraByID(w http.ResponseWriter, r *http.Request, app *App, id string) {
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 
 	default:
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET/PUT/DELETE만 허용"})
+		methodNotAllowed(w, "GET, PUT, DELETE")
 	}
 }
 
 // cameraProfiles는 GET /api/cameras/{id}/profiles를 처리한다 (저장 자격증명 사용).
 func cameraProfiles(w http.ResponseWriter, r *http.Request, app *App, id string) {
 	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET만 허용"})
+		methodNotAllowed(w, "GET")
 		return
 	}
 	profiles, err := app.Camera.GetCameraProfiles(id)
@@ -399,7 +407,7 @@ func cameraProfiles(w http.ResponseWriter, r *http.Request, app *App, id string)
 // cameraPresets는 GET /api/cameras/{id}/presets를 처리한다 (저장 자격증명 사용).
 func cameraPresets(w http.ResponseWriter, r *http.Request, app *App, id string) {
 	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET만 허용"})
+		methodNotAllowed(w, "GET")
 		return
 	}
 	presets, err := app.Camera.GetCameraPresets(id)
@@ -413,7 +421,7 @@ func cameraPresets(w http.ResponseWriter, r *http.Request, app *App, id string) 
 // cameraStreamURI는 GET /api/cameras/{id}/stream-uri를 처리한다 (저장 자격증명 사용).
 func cameraStreamURI(w http.ResponseWriter, r *http.Request, app *App, id string) {
 	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET만 허용"})
+		methodNotAllowed(w, "GET")
 		return
 	}
 	uri, err := app.Camera.GetCameraStreamURI(id)
@@ -424,7 +432,7 @@ func cameraStreamURI(w http.ResponseWriter, r *http.Request, app *App, id string
 	writeJSON(w, http.StatusOK, map[string]string{"uri": uri})
 }
 
-// isNotFound는 서비스 계층의 "카메라를 찾을 수 없음" 오류를 판별한다.
+// isNotFound는 서비스 계층의 카메라 미발견 오류를 판별한다. (센티널 errors.Is 기반)
 func isNotFound(err error) bool {
-	return strings.Contains(err.Error(), "카메라를 찾을 수 없음")
+	return errors.Is(err, camera.ErrNotFound)
 }

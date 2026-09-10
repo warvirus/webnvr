@@ -8,6 +8,7 @@ import {useUIStore} from '../store/uiStore';
 import {IconPlay} from '../components/common/Icons';
 import {RecCalendar} from '../components/playback/RecCalendar';
 import {CamOverview, DayCount, recordings, RecordingStatus, Timeline} from '../services/recordings';
+import {LOCALE} from '../services/locale';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MIN_MS = 60 * 1000;
@@ -18,7 +19,7 @@ const LIVE_CATCHUP_MS = 30_000;     // 끝 도달 판정 여유 — 끝에서 �
 const DRAG_CLICK_PX = 5;            // 드래그/클릭 판정 임계값
 
 function fmtTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString('ko-KR', {hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false});
+  return new Date(ms).toLocaleTimeString(LOCALE, {hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false});
 }
 function fmtDay(ms: number): string {
   const d = new Date(ms);
