@@ -893,10 +893,12 @@ input, select { font-family: inherit; }
 }
 
 /* ── 영상 검색 좌/우 2컬럼 레이아웃 ─────────────────────────
-   좌 = 녹화 현황(날짜/달력/채널 목록), 우 = 타임라인+재생. */
+   좌 = 녹화 현황(날짜/달력/채널 목록), 우 = 타임라인+재생.
+   좌측 폭은 날짜 행(달력+새로고침) 내용에 맞춘다 — 카메라 박스 끝선이
+   새로고침 버튼 끝선과 정렬된다. */
 .playback-layout {
   display: grid;
-  grid-template-columns: minmax(250px, 300px) minmax(0, 1fr);
+  grid-template-columns: fit-content(320px) minmax(0, 1fr);
   align-items: start;
   gap: 18px;
   width: 100%;
@@ -911,9 +913,12 @@ input, select { font-family: inherit; }
 .date-row {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 10px;
   margin-top: 4px;
+  min-width: max-content; /* 컬럼 폭의 기준 — 새로고침까지 한 줄 유지 */
+}
+.date-row > .btn:last-child {
+  margin-left: auto; /* 새로고침을 박스 끝선에 정렬 */
 }
 .date-anchor {
   position: relative; /* 달력 팝업의 기준점 */
