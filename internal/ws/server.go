@@ -219,6 +219,18 @@ func (s *Server) serveConn(conn *websocket.Conn) {
 	go st.heartbeat(heartbeatStop)
 	defer close(heartbeatStop)
 
+	// 연결별 직렬 워커 — start_stream의 ONVIF URI 조회(최대 10초)가 읽기 루프를
+	// 막아 하트비트·PTZ·다른 카메라 시작까지 멈추던 문제를 분리한다.
+	// 큐는 순서 보장(start→stop 직렬 처리, 고스트 스트림 방지), 상한 초과분은 폐기한다.
+	// ping/ptz는 인라인 즉시 처리 — 하트비트와 조작 응답성이 느린 명령 뒤에 줄 서지 않는다.
+	work := make(chan ClientMsg, 256)
+	go func() {
+		for m := range work {
+			st.handleClientMsg(s.ctrl, m)
+		}
+	}()
+	defer close(work)
+
 	conn.SetReadDeadline(time.Now().Add(readWait))
 	conn.SetPongHandler(func(string) error {
 		return conn.SetReadDeadline(time.Now().Add(readWait))
@@ -233,6 +245,15 @@ func (s *Server) serveConn(conn *websocket.Conn) {
 			return
 		}
 		conn.SetReadDeadline(time.Now().Add(readWait))
-		st.handleClientMsg(s.ctrl, m)
+		switch m.Type {
+		case MsgPing, MsgPTZ:
+			st.handleClientMsg(s.ctrl, m)
+		default:
+			select {
+			case work <- m:
+			default:
+				slog.Warn("WS 명령 큐 포화 — 명령 폐기", "type", m.Type, "camera", m.CameraID)
+			}
+		}
 	}
 }

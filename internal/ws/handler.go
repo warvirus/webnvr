@@ -29,6 +29,7 @@ type connState struct {
 	wmu  sync.Mutex // 쓰기 직렬화
 
 	mu        sync.Mutex
+	closed    bool                // cleanupAll 완료 — 이후 구독 등록 금지 (워커 잔여 명령 방지)
 	cancels   map[string]func()   // cameraID → 구독 해제
 	ptzMoving map[string]struct{} // 연속 이동 중인 카메라 — 연결 끊김 시 정지 전송용
 }
@@ -56,6 +57,10 @@ func (s *connState) handleError(cameraID, msg string) {
 // startStream은 스트림을 시작하고 구독 이벤트를 연결로 펌핑한다.
 func (s *connState) startStream(ctrl Controller, cameraID string) {
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return // 연결 정리 완료 — 워커 잔여 명령이 유령 구독을 만들지 않게 막는다
+	}
 	if _, ok := s.cancels[cameraID]; ok {
 		s.mu.Unlock()
 		return // 이미 구독 중
@@ -76,6 +81,11 @@ func (s *connState) startStream(ctrl Controller, cameraID string) {
 	slog.Info("▶️ 스트림 구독 시작", "camera", cameraID)
 
 	s.mu.Lock()
+	if s.closed { // Start/Subscribe 동안 연결이 정리됨 — 즉시 해제
+		s.mu.Unlock()
+		cancel()
+		return
+	}
 	if _, exists := s.cancels[cameraID]; exists {
 		s.mu.Unlock()
 		cancel()
@@ -282,6 +292,7 @@ func (s *connState) notePTZ(cameraID string, cmd PTZCommand) {
 // 정지시킨다 — 러너웨이 방지가 우선이라는 정책 선택이다.
 func (s *connState) cleanupAll(ctrl Controller) {
 	s.mu.Lock()
+	s.closed = true
 	cancels := s.cancels
 	s.cancels = map[string]func(){}
 	moving := make([]string, 0, len(s.ptzMoving))

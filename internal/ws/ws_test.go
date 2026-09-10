@@ -17,13 +17,14 @@ import (
 
 // fakeController는 Controller 인터페이스의 테스트 구현이다.
 type fakeController struct {
-	mu       sync.Mutex
-	started  []string
-	stopped  []string
-	reloaded []string
-	ptzCmds  []PTZCommand
-	failIDs  map[string]bool                // Start 실패 카메라
-	chans    map[string][]chan stream.Event // 카메라별 다중 구독자
+	mu         sync.Mutex
+	started    []string
+	stopped    []string
+	reloaded   []string
+	ptzCmds    []PTZCommand
+	failIDs    map[string]bool                // Start 실패 카메라
+	chans      map[string][]chan stream.Event // 카메라별 다중 구독자
+	startDelay time.Duration                  // Start 인위적 지연 — 워커 분리 검증용
 }
 
 func newFakeController() *fakeController {
@@ -34,6 +35,12 @@ func newFakeController() *fakeController {
 }
 
 func (f *fakeController) Start(cameraID string) error {
+	f.mu.Lock()
+	delay := f.startDelay
+	f.mu.Unlock()
+	if delay > 0 {
+		time.Sleep(delay) // 락 밖에서 대기 — 다른 검사를 막지 않는다
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failIDs[cameraID] {
@@ -500,5 +507,59 @@ func TestPTZStopOnDisconnect(t *testing.T) {
 			t.Fatalf("연결 끊김 후 PTZ 정지 미전송: %+v", ctrl.ptzCmds)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestWorkerDoesNotBlockPing — 느린 start_stream(ONVIF 조회 지연)이 ping 응답을
+// 막지 않는다 (3-2 워커 분리 회귀).
+func TestWorkerDoesNotBlockPing(t *testing.T) {
+	ctrl := newFakeController()
+	ctrl.startDelay = 800 * time.Millisecond
+	srv := newTestServer(t, ctrl)
+	c := connect(t, srv)
+
+	if err := c.WriteJSON(ClientMsg{Type: MsgStartStream, CameraID: "cam-slow"}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond) // 워커가 Start에 진입한 뒤
+
+	start := time.Now()
+	if err := c.WriteJSON(ClientMsg{Type: MsgPing}); err != nil {
+		t.Fatal(err)
+	}
+	m := recv(t, c)
+	if m.Type != MsgPong {
+		t.Fatalf("ping 응답 = %s, want pong", m.Type)
+	}
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Errorf("ping이 느린 start에 막힘: %v", elapsed)
+	}
+}
+
+// TestStartStopOrderPreserved — 워커 큐에서 start→stop이 직렬 처리되어
+// stop이 start보다 먼저 실행되어 유령 구독이 남지 않는다.
+func TestStartStopOrderPreserved(t *testing.T) {
+	ctrl := newFakeController()
+	ctrl.startDelay = 200 * time.Millisecond
+	srv := newTestServer(t, ctrl)
+	c := connect(t, srv)
+
+	if err := c.WriteJSON(ClientMsg{Type: MsgStartStream, CameraID: "cam-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.WriteJSON(ClientMsg{Type: MsgStopStream, CameraID: "cam-1"}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1 * time.Second)
+
+	ctrl.mu.Lock()
+	started := len(ctrl.started)
+	subs := len(ctrl.chans["cam-1"]) // cancel 실행 → 채널 제거
+	ctrl.mu.Unlock()
+	if started == 0 {
+		t.Fatal("start 미실행")
+	}
+	if subs != 0 {
+		t.Errorf("구독 잔존 — stop이 start 뒤에 실행되지 않음: %d", subs)
 	}
 }
