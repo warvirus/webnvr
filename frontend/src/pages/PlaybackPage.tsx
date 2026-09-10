@@ -48,6 +48,15 @@ function fmtSpan(ms: number): string {
   return `${Math.round(ms / MIN_MS)}분`;
 }
 
+// tryPlay는 브라우저 자동재생 정책을 견딘다 — 제스처 없는 play가 거부되면 음소거로
+// 재시도한다(녹화 스트림은 무음이라 체감 없음). 그래도 거부되면 컨트롤 바의 재생 버튼을 쓴다.
+function tryPlay(video: HTMLVideoElement) {
+  video.play().catch(() => {
+    video.muted = true;
+    video.play().catch(() => { /* 사용자 조작 대기 */ });
+  });
+}
+
 // PlaybackPage는 녹화 타임라인에서 임의 시각을 재생/seek하고 실시간 녹화를 이어본다.
 export function PlaybackPage() {
   const pushToast = useUIStore(s => s.pushToast);
@@ -83,12 +92,18 @@ export function PlaybackPage() {
   const ordered = useMemo(() =>
     [...cameras].sort((a, b) => a.layoutOrder - b.layoutOrder), [cameras]);
 
-  // 기본 선택: 이 날짜에 녹화가 있는 첫 카메라 (없으면 첫 카메라) — 자동 선택은 재생하지 않는다
+  // 기본 선택: 이 날짜에 녹화가 있는 첫 카메라 (없으면 첫 카메라).
+  // 선택이 실제로 바뀔 때 첫 영상 자동 재생을 예약한다 — 모니터링 → 영상 검색 진입 시
+  // 바로 재생되어야 한다는 사용자 요구 (기존 "자동 선택은 재생하지 않는다" 정책 변경).
   useEffect(() => {
     setCamId(cur => {
       if (cur && (overview.size === 0 || overview.has(cur))) return cur;
       const withRec = ordered.find(c => overview.has(c.id));
-      return (withRec ?? ordered[0])?.id ?? '';
+      const next = (withRec ?? ordered[0])?.id ?? '';
+      if (next && next !== cur) {
+        autoPlayRef.current = {id: next, mode: 'first'}; // idempotent — updater 재호출에도 무해
+      }
+      return next;
     });
   }, [overview, ordered]);
 
@@ -171,7 +186,7 @@ export function PlaybackPage() {
       .sort((a, b) => b.startTs - a.startTs)[0];
     playBaseRef.current = seg ? seg.startTs : fromTs;
     pendingOffsetRef.current = seg ? Math.round((fromTs - seg.startTs) / 100) * 100 : 0;
-    video.play().catch(() => { /* 일부 환경 — loadedmetadata에서 재시도 */ });
+    tryPlay(video);
   }, [camId, dayStart, tl, pushToast]);
 
   // pendingOffset 적용 — 소스가 바뀔 때마다 1회 (리스너 누수 없음)
@@ -183,7 +198,7 @@ export function PlaybackPage() {
         try { video.currentTime = pendingOffsetRef.current / 1000; } catch { /* 무시 */ }
         pendingOffsetRef.current = 0;
       }
-      video.play().catch(() => { /* 사용자 제스처 필요 시 무시 */ });
+      tryPlay(video);
     };
     video.addEventListener('loadedmetadata', apply);
     return () => video.removeEventListener('loadedmetadata', apply);
@@ -552,7 +567,7 @@ export function PlaybackPage() {
 
 
         <div className="discovery-head">
-          <h3>재생{selectedCam ? ` — ${selectedCam.name}` : ''}</h3>
+          <h3>{selectedCam ? `${selectedCam.name}` : ''}</h3>
           {hasRecording && (
             <button className="btn btn-primary" disabled={!camId}
               onClick={() => seek(ranges[0].fromMs)}>

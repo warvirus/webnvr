@@ -16,6 +16,7 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	mac "github.com/wailsapp/wails/v2/pkg/options/mac"
 
 	"webnvr/internal/api"
 )
@@ -71,6 +72,13 @@ func main() {
 			Assets: assets,
 		},
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
+		// 영상 검색 진입 시 첫 영상 자동 재생 — WKWebView 기본 정책(제스처 필요) 해제.
+		// NVR은 페이지 진입만으로 녹화가 바로 보여야 한다.
+		Mac: &mac.Options{
+			Preferences: &mac.Preferences{
+				EnableAutoplayWithoutUserAction: mac.Enabled,
+			},
+		},
 		OnShutdown: func(_ context.Context) {
 			appCtx.Close()
 		},
