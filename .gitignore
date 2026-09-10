@@ -131,3 +131,5 @@ core.*
 *.pid
 *.lock
 nohup.out/webnvr-server
+
+server
