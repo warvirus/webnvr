@@ -14,7 +14,7 @@ type PTZCommand struct {
 	Action      string  `json:"action"`
 	Pan         float64 `json:"pan,omitempty"`  // -1.0~1.0
 	Tilt        float64 `json:"tilt,omitempty"` // -1.0~1.0
-	Zoom        float64 `json:"zoom,omitempty"` // 0~1.0
+	Zoom        float64 `json:"zoom,omitempty"` // -1.0~1.0 (음수 = 줌아웃)
 	PresetToken string  `json:"presetToken,omitempty"`
 }
 

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"sync"
 	"time"
@@ -18,6 +19,12 @@ import (
 
 // nowMS는 벽시계(epoch ms)다. 테스트에서 교체한다.
 var nowMS = func() int64 { return time.Now().UnixMilli() }
+
+// eventTypeRe는 이벤트 유형 화이트리스트다. 파일명에 쓰이므로 경로 조작을 차단한다.
+var eventTypeRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,32}$`)
+
+// ValidEventType은 이벤트 유형이 파일명으로 안전한지 검사한다.
+func ValidEventType(typ string) bool { return eventTypeRe.MatchString(typ) }
 
 const mib = 1 << 20
 
@@ -107,6 +114,35 @@ func NewRecorder(cfg RecorderConfig) *Recorder {
 
 // continuous는 상시 회전 세그먼트를 기록하는 모드인지 반환한다.
 func (r *Recorder) continuous() bool { return r.mode == camera.RecordContinuous || r.mode == camera.RecordBoth }
+
+// SetMode는 녹화 모드를 동적으로 전환한다. 세션(RTSP)은 유지되며 열린 세그먼트만 정리한다.
+// 모드가 실제로 바뀌면 true를 반환한다.
+func (r *Recorder) SetMode(mode string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || r.mode == mode {
+		return false
+	}
+	r.mode = mode
+	r.eventCapable = mode == camera.RecordEvent || mode == camera.RecordBoth
+	if !r.continuous() {
+		r.closeCurLocked()
+	} else {
+		r.pendDiscont = true // 재개 세그먼트는 불연속
+	}
+	if !r.eventCapable {
+		r.closeEvLocked()
+		r.ring = r.ring[:0]
+	}
+	return true
+}
+
+// Mode는 현재 녹화 모드를 반환한다.
+func (r *Recorder) Mode() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.mode
+}
 
 // OnInfo는 스트림 (재)시작 시 코덱과 파라미터 셋을 알린다.
 func (r *Recorder) OnInfo(codec stream.Codec, sps, pps, vps []byte) {
@@ -203,6 +239,10 @@ func (r *Recorder) TriggerEvent(typ string) (int64, error) {
 	}
 	if typ == "" {
 		typ = "manual"
+	}
+	// 유형은 클립 파일명에 쓰이므로 경로 조작을 차단한다
+	if !eventTypeRe.MatchString(typ) {
+		return 0, fmt.Errorf("이벤트 유형은 영문/숫자/_/- 32자 이하여야 합니다")
 	}
 	now := nowMS()
 	if r.evSink != nil {

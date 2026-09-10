@@ -189,15 +189,29 @@ func TestManagerModeChangeRestartsSession(t *testing.T) {
 		t.Fatal("continuous 세션 미시작")
 	}
 
-	// continuous → event: 세션이 유지되어야 한다 (pre-roll을 위해 24/7 세션 필요)
+	// continuous → event: 세션 유지 + 실제 모드 전환 확인 (pre-roll을 위해 24/7 세션 필요)
 	cams[0].RecordMode = camera.RecordEvent
 	m.NotifyCameras()
 	waitFor(func() bool {
 		s := m.Status()
-		return len(s.Recording) == 1 && s.Recording[0].CameraID == "cam-1"
+		return len(s.Recording) == 1 && s.Recording[0].CameraID == "cam-1" && s.Recording[0].Mode == camera.RecordEvent
 	})
 	if m.Count() != 1 {
 		t.Fatalf("event 모드 전환 후 세션 = %d, want 1 (24/7 유지)", m.Count())
+	}
+	if st := m.Status(); st.Recording[0].Mode != camera.RecordEvent {
+		t.Errorf("recorder 모드 = %s, want event (동적 전환 실패 — 트리거가 계속 실패함)", st.Recording[0].Mode)
+	}
+
+	// event → continuous: 상시 녹화 재개 확인 (침묵 공백 방지)
+	cams[0].RecordMode = camera.RecordContinuous
+	m.NotifyCameras()
+	waitFor(func() bool {
+		s := m.Status()
+		return len(s.Recording) == 1 && s.Recording[0].Mode == camera.RecordContinuous
+	})
+	if st := m.Status(); st.Recording[0].Mode != camera.RecordContinuous {
+		t.Errorf("recorder 모드 = %s, want continuous (상시 녹화 미재개)", st.Recording[0].Mode)
 	}
 
 	// event → off: 세션 제거

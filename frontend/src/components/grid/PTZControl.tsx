@@ -118,10 +118,23 @@ export function PTZControl({cameraId}: Props) {
             />
           </div>
           <div className="ptz-zoom">
-            <button className="btn" onClick={() => ptzControl(cameraId, {action: 'move', zoom: 0.4 * speed})}
-              onPointerUp={() => ptzControl(cameraId, {action: 'stop'})}>줌 +</button>
-            <button className="btn" onClick={() => ptzControl(cameraId, {action: 'move', zoom: 0})}
-              onPointerUp={() => ptzControl(cameraId, {action: 'stop'})}>줌 −</button>
+            {/* press-동안 이동, release-정지. pointerdown에서 전송해야 stop이 마지막 명령이 된다 */}
+            <button className="btn"
+              onPointerDown={e => {
+                e.stopPropagation();
+                (e.target as HTMLElement).setPointerCapture(e.pointerId);
+                ptzControl(cameraId, {action: 'move', zoom: 0.4 * speed});
+              }}
+              onPointerUp={() => ptzControl(cameraId, {action: 'stop'})}
+              onPointerCancel={() => ptzControl(cameraId, {action: 'stop'})}>줌 +</button>
+            <button className="btn"
+              onPointerDown={e => {
+                e.stopPropagation();
+                (e.target as HTMLElement).setPointerCapture(e.pointerId);
+                ptzControl(cameraId, {action: 'move', zoom: -0.4 * speed});
+              }}
+              onPointerUp={() => ptzControl(cameraId, {action: 'stop'})}
+              onPointerCancel={() => ptzControl(cameraId, {action: 'stop'})}>줌 −</button>
           </div>
         </div>
       </div>

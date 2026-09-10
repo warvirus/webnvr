@@ -117,7 +117,7 @@ func (m *Manager) reconcile() error {
 	}
 
 	m.mu.Lock()
-	// 제거 대상: desired에 없는 세션 (모드가 바뀐 세션은 아래에서 정지+재기동)
+	// 제거 대상: desired에 없는 세션
 	var toStop []string
 	for id := range m.sessions {
 		if _, ok := desired[id]; !ok {
@@ -133,8 +133,7 @@ func (m *Manager) reconcile() error {
 			toStart = append(toStart, c)
 			continue
 		}
-		if s.rec.mode != wantMode {
-			toStart = append(toStart, c)
+		if s.rec.SetMode(wantMode) { // 세션 유지 — RTSP 재다이얼 없이 모드만 전환
 			continue
 		}
 		// 같은 모드 — pre/post-roll만 변경 시 세션 교체 없이 필드만 갱신
@@ -221,7 +220,7 @@ func (m *Manager) Status() StatusInfo {
 	m.mu.Lock()
 	recording := make([]RecordingInfo, 0, len(m.sessions))
 	for id, s := range m.sessions {
-		recording = append(recording, RecordingInfo{CameraID: id, Mode: s.rec.mode})
+		recording = append(recording, RecordingInfo{CameraID: id, Mode: s.rec.Mode()})
 	}
 	m.mu.Unlock()
 	return StatusInfo{

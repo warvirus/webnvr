@@ -22,7 +22,7 @@ export interface PTZCommand {
   action: 'move' | 'stop' | 'preset';
   pan?: number;  // -1.0~1.0
   tilt?: number; // -1.0~1.0
-  zoom?: number; // 0~1.0
+  zoom?: number; // -1.0~1.0 (음수 = 줌아웃)
   presetToken?: string;
 }
 

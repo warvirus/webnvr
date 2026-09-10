@@ -498,6 +498,9 @@ func (s *CameraService) TriggerCameraEvent(id, typ string) error {
 	if s.recManager == nil {
 		return fmt.Errorf("녹화 기능을 사용할 수 없습니다")
 	}
+	if typ != "" && !recording.ValidEventType(typ) {
+		return fmt.Errorf("이벤트 유형은 영문/숫자/_/- 32자 이하여야 합니다")
+	}
 	return s.recManager.TriggerEvent(id, typ)
 }
 

@@ -2,6 +2,7 @@
 package recording
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -88,6 +89,87 @@ func TestRecorderTriggerWithoutEventMode(t *testing.T) {
 	if _, err := r.TriggerEvent(""); err == nil {
 		t.Fatal("continuous 모드에서 트리거가 성공함")
 	}
+}
+
+// TestRecorderEventTypeSanitized — 이벤트 유형은 화이트리스트만 허용한다 (경로 조작 차단).
+func TestRecorderEventTypeSanitized(t *testing.T) {
+	_, setNow := withFakeSink(t)
+	s := newTestStore(t)
+	r := NewRecorder(RecorderConfig{
+		CameraID: "cam-1", Pool: testPool(t), SegmentSeconds: 300, SegmentMaxMB: 512,
+		Mode: camera.RecordEvent, Store: s,
+	})
+	r.OnInfo(stream.CodecH264, nil, nil, nil)
+	n, _ := au(true)
+	r.OnNALU(stream.CodecH264, n, 90000, true)
+	for _, typ := range []string{"../../etc/pwned", "a/b", "..", "이벤트!", ""} {
+		if _, err := r.TriggerEvent(typ); err != nil && typ == "" {
+			t.Fatalf("빈 유형은 manual 기본값이어야 함: %v", err)
+		} else if (err == nil) != (typ == "") {
+			t.Errorf("typ = %q: err = %v, 빈 값만 허용되어야 함", typ, err)
+		}
+	}
+	setNow(2_000)
+	// 안전한 유형과 빈 유형은 성공
+	if _, err := r.TriggerEvent("motion_ok-1"); err != nil {
+		t.Fatalf("화이트리스트 유형 거부됨: %v", err)
+	}
+	r.Close()
+	rows, _ := s.Oldest(10)
+	if len(rows) == 0 || rows[0].Kind != "event" {
+		t.Fatalf("event 행 없음: %+v", rows)
+	}
+	if !strings.HasSuffix(rows[0].RelPath, "manual.ts") {
+		t.Errorf("빈 유형 클립 = %s, want ...manual.ts", rows[0].RelPath)
+	}
+}
+
+// TestRecorderSetMode — 세션 유지 상태에서 모드가 동적으로 전환된다.
+func TestRecorderSetMode(t *testing.T) {
+	sinks, setNow := withFakeSink(t)
+	s := newTestStore(t)
+	r := NewRecorder(RecorderConfig{
+		CameraID: "cam-1", Pool: testPool(t), SegmentSeconds: 300, SegmentMaxMB: 512,
+		Mode: camera.RecordContinuous, PreRollSeconds: 5, PostRollSeconds: 5, Store: s,
+	})
+	r.OnInfo(stream.CodecH264, []byte{0x67, 1}, []byte{0x68, 1}, nil)
+	n, _ := au(true)
+	r.OnNALU(stream.CodecH264, n, 90000, true)
+	if len(*sinks) != 1 {
+		t.Fatalf("상시 세그먼트 미시작: %d", len(*sinks))
+	}
+
+	// continuous → event: 상시 세그먼트 닫힘, 트리거 가능해짐
+	if !r.SetMode(camera.RecordEvent) {
+		t.Fatal("SetMode가 변경을 보고하지 않음")
+	}
+	if r.Mode() != camera.RecordEvent {
+		t.Fatalf("mode = %s, want event", r.Mode())
+	}
+	if !(*sinks)[0].closed {
+		t.Error("event 전환 후 상시 세그먼트가 안 닫힘")
+	}
+	if _, err := r.TriggerEvent("manual"); err != nil {
+		t.Fatalf("event 전환 후 트리거 실패: %v", err)
+	}
+	if len(*sinks) != 2 {
+		t.Fatalf("클립 미개시: %d", len(*sinks))
+	}
+
+	// event → continuous: 상시 녹화 재개 (다음 IDR에서), 클립 닫힘
+	setNow(3_000)
+	if !r.SetMode(camera.RecordContinuous) {
+		t.Fatal("SetMode가 변경을 보고하지 않음")
+	}
+	if !(*sinks)[1].closed {
+		t.Error("continuous 전환 후 클립이 안 닫힘")
+	}
+	nn, kk := au(true)
+	r.OnNALU(stream.CodecH264, nn, 180000, kk)
+	if len(*sinks) != 3 {
+		t.Fatalf("continuous 재개 세그먼트 미시작: %d", len(*sinks))
+	}
+	r.Close()
 }
 
 // TestRecorderBothModeRecordsBoth — both 모드는 상시 세그먼트와 이벤트 클립을 동시에 만든다.

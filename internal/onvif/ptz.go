@@ -17,7 +17,7 @@ import (
 type PTZMove struct {
 	Pan  float64
 	Tilt float64
-	Zoom float64 // 0~1.0
+	Zoom float64 // -1.0~1.0 (음수 = 줌아웃)
 }
 
 // ContinuousMove는 지정 시간 동안 카메라를 연속 이동시킨다.
