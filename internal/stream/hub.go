@@ -207,22 +207,25 @@ func (h *Hub) Subscribe(cameraID string) (<-chan Event, func(), error) {
 			// 채널 포화는 불가능(방금 생성) — 방어용
 		}
 	}
+	// cancel은 자신이 합류한 세대(e)에만 작동한다 — ID로 현재 세션을 찾으면
+	// 세대 교체 후 stale cancel이 새 세션(refs=0인 Start~Subscribe 창)을 죽인다.
 	cancel := func() {
 		h.mu.Lock()
-		cur, ok := h.streams[cameraID]
-		if !ok {
+		if e.closed { // closeGen이 이미 채널을 닫음 — 해제할 것 없음
 			h.mu.Unlock()
 			return
 		}
-		if _, present := cur.subs[s]; present {
-			delete(cur.subs, s)
-			cur.refs--
+		if _, present := e.subs[s]; present {
+			delete(e.subs, s)
+			e.refs--
 		}
-		lastRef := cur.refs <= 0
+		lastRef := e.refs <= 0
+		isCurrent := h.streams[cameraID] == e
 		h.mu.Unlock()
 
-		// 마지막 구독자가 떠났으면 RTSP 세션도 해제한다 (락 밖에서 호출).
-		if lastRef {
+		// 마지막 구독자가 떠났고 이 세대가 아직 현재 세션이면 RTSP도 해제한다.
+		// 교체된 세대는 이미 정리 대상 — 새 세션을 건드리지 않는다.
+		if lastRef && isCurrent {
 			h.closeSession(cameraID)
 		}
 	}
@@ -352,6 +355,13 @@ func (h *Hub) closeGen(e *activeStream, cameraID string, abnormal bool) {
 		return
 	}
 	e.closed = true
+	// 구독자를 스냅샷으로 떼어낸다 — 이후 e.subs 변형은 없다(cancel이 closed 보고 조기 반환,
+	// Subscribe는 맵에서 제거된 세대에 도달 불가).
+	detach := make([]*subscriber, 0, len(e.subs))
+	for s := range e.subs {
+		detach = append(detach, s)
+	}
+	e.subs = map[*subscriber]struct{}{}
 	h.mu.Unlock()
 
 	if e.cancel != nil {
@@ -364,12 +374,7 @@ func (h *Hub) closeGen(e *activeStream, cameraID string, abnormal bool) {
 	if abnormal {
 		reason = "연결 끊김"
 	}
-	h.detachSubs(e, reason)
-}
-
-// detachSubs는 세션의 구독자에게 종료 이벤트를 보내고 채널을 닫는다.
-func (h *Hub) detachSubs(e *activeStream, reason string) {
-	for s := range e.subs {
+	for _, s := range detach {
 		select {
 		case s.ch <- StoppedEvent{Reason: reason}:
 		default:

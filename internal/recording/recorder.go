@@ -148,6 +148,21 @@ func (r *Recorder) Mode() string {
 	return r.mode
 }
 
+// Rolls는 현재 pre-roll(90kHz)과 post-roll(ms)을 반환한다. (reconcile의 레이스 없는 비교용)
+func (r *Recorder) Rolls() (preRollB int64, postRollMS int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.preRollB, r.postRoll
+}
+
+// SetRolls는 pre/post-roll을 갱신한다. 세션 교체 없이 카메라 설정 변경을 반영한다.
+func (r *Recorder) SetRolls(preRollSeconds, postRollSeconds int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.preRollB = int64(preRollSeconds) * 90000
+	r.postRoll = int64(postRollSeconds) * 1000
+}
+
 // OnInfo는 스트림 (재)시작 시 코덱과 파라미터 셋을 알린다.
 func (r *Recorder) OnInfo(codec stream.Codec, sps, pps, vps []byte) {
 	r.mu.Lock()

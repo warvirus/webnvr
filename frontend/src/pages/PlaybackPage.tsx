@@ -257,6 +257,8 @@ export function PlaybackPage() {
     loadOverview();
     const video = videoRef.current;
     if (!video || !seekTs || !tl || tl.segments.length === 0) return;
+    // stale 타임라인 가드 — 요청 카메라와 도착 타임라인이 일치할 때만 이어받기를 판단한다
+    if (tl.cameraId !== camId) return;
     // 일시정지 중에는 이어받기를 하지 않는다 — 60초마다 사용자의 일시정지가 풀리는 문제 방지
     const atEnd = !video.paused && !video.seeking &&
       (video.ended || video.duration > 0 && (video.duration - video.currentTime) * 1000 <= LIVE_CATCHUP_MS);
@@ -267,7 +269,7 @@ export function PlaybackPage() {
         : seekTs;
       seek(wallTs);
     }
-  }, [loadTimeline, loadOverview, seekTs, tl, seek]);
+  }, [loadTimeline, loadOverview, seekTs, tl, camId, seek]);
 
   useEffect(() => {
     const t = setInterval(refreshLive, LIVE_REFRESH_MS);

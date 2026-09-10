@@ -140,6 +140,11 @@ func (m *Manager) sweepOrphans() {
 			if err != nil {
 				return nil
 			}
+			// 녹화 산출물은 <cam>/... 경로 아래에서만 생성된다 — 루트 바로 아래 파일은
+			// 사용자 소유일 수 있으므로 건드리지 않는다.
+			if !strings.Contains(filepath.ToSlash(rel), "/") {
+				return nil
+			}
 			if known[i][filepath.ToSlash(rel)] {
 				return nil
 			}
@@ -213,11 +218,8 @@ func (m *Manager) reconcile() error {
 			continue
 		}
 		// 같은 모드 — pre/post-roll만 변경 시 세션 교체 없이 필드만 갱신
-		if s.rec.preRollB != int64(prerollOf(c))*90000 || s.rec.postRoll != int64(postrollOf(c))*1000 {
-			s.rec.mu.Lock()
-			s.rec.preRollB = int64(prerollOf(c)) * 90000
-			s.rec.postRoll = int64(postrollOf(c)) * 1000
-			s.rec.mu.Unlock()
+		if preB, postMS := s.rec.Rolls(); preB != int64(prerollOf(c))*90000 || postMS != int64(postrollOf(c))*1000 {
+			s.rec.SetRolls(prerollOf(c), postrollOf(c))
 		}
 	}
 	for _, id := range toStop {
@@ -362,7 +364,11 @@ func (m *Manager) addRecorder(c camera.Camera) {
 		Store:           m.store,
 	})
 	ctx, cancel := context.WithCancel(context.Background())
-	sess := &recSession{rec: rec, cancel: cancel}
+	// 탭을 비동기로 감싼다 — 세그먼트 회전 시 Statfs/MkdirAll/DB INSERT 같은 느린 I/O가
+	// RTP 수신 스레드를 블로킹해 라이브 배포가 버스트로 끊기는 것을 막는다.
+	// 큐는 유계이며 포화 시 다음 IDR까지 AU를 드롭한다(오염된 P-프레임 < 시간 갭).
+	tap, tapStop := asyncTap(rec.OnNALU)
+	sess := &recSession{rec: rec, cancel: cancel, tapStop: tapStop}
 	m.sessions[c.ID] = sess
 	m.mu.Unlock()
 
@@ -372,12 +378,16 @@ func (m *Manager) addRecorder(c camera.Camera) {
 			wasRunning = true
 		}
 	}
-	// 탭을 비동기로 감싼다 — 세그먼트 회전 시 Statfs/MkdirAll/DB INSERT 같은 느린 I/O가
-	// RTP 수신 스레드를 블로킹해 라이브 배포가 버스트로 끊기는 것을 막는다.
-	// 큐는 유계이며 포화 시 AU를 드롭한다(녹화 프레임 유실 < 라이브 지연).
-	tap, tapStop := asyncTap(rec.OnNALU)
-	sess.tapStop = tapStop
 	m.hub.SetNALUTap(c.ID, tap)
+	// 등록 직후 정지(reconcile 경합)와 겹치면 탭이 고아가 된다 — 재확인 후 해제한다.
+	m.mu.Lock()
+	_, stillActive := m.sessions[c.ID]
+	m.mu.Unlock()
+	if !stillActive {
+		m.hub.SetNALUTap(c.ID, nil)
+		tapStop()
+		return
+	}
 	if wasRunning {
 		m.hub.Reload(c.ID) // 탭 없이 돌던 세션을 재다이얼해 NALU 탭 반영
 	}
@@ -426,6 +436,8 @@ func asyncTap(onNALU stream.NALUTap) (stream.NALUTap, func()) {
 		case ch <- auCall{codec: codec, nalus: cp, pts: pts, key: key}:
 		default:
 			// 녹화 큐 포화 — 디스크/DB 병목. AU 1개 드롭은 세그먼트 1프레임 유실이다.
+			// 포화가 지속되면 다음 세그먼트의 P/B 프레임 연쇄 오류 가능 — IDR 경계에서
+			// 자연 복구되므로 로그 스팸 대신 통계만 남긴다.
 		}
 	}
 	return tap, func() {

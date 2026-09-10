@@ -641,3 +641,48 @@ func TestHubCloseStaleGeneration(t *testing.T) {
 	}
 	hub.StopAll()
 }
+
+// TestHubCancelStaleGeneration — 교체된 세대의 stale cancel이 새 세션을 죽이지 않는다.
+// Start~Subscribe 사이 refs=0 창에서 이전 세대 구독자의 cancel이 실행되는 시나리오다.
+func TestHubCancelStaleGeneration(t *testing.T) {
+	hub := NewHub(testCameraSource{urls: map[string]string{"cam-1": "rtsp://127.0.0.1:1/stream"}}, fakeDialer(1000))
+
+	if err := hub.Start("cam-1"); err != nil {
+		t.Fatal(err)
+	}
+	_, cancel1, err := hub.Subscribe("cam-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	// 세대 교체 — 구세대(e1)는 closeGen으로 닫히고 새 세대가 맵에 등록된다
+	hub.Reload("cam-1")
+	hub.Start("cam-1") // Subscribe 전 — refs=0 창
+	time.Sleep(50 * time.Millisecond)
+
+	// stale cancel — 새 세션(refs=0)을 closeSession하면 안 된다
+	cancel1()
+	time.Sleep(100 * time.Millisecond)
+	if _, ok := hub.Info("cam-1"); !ok {
+		t.Fatal("stale cancel이 새 세션을 파괴함")
+	}
+
+	// 새 세션 구독 → 마지막 구독자 해제 시 정상 종료 (기존 의미론 유지)
+	_, cancel2, err := hub.Subscribe("cam-1")
+	if err != nil {
+		t.Fatalf("새 세션 구독 실패: %v", err)
+	}
+	cancel2()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := hub.Info("cam-1"); !ok {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if _, ok := hub.Info("cam-1"); ok {
+		t.Error("마지막 구독자 해제 후 세션이 유지됨 (종료되어야 함)")
+	}
+	hub.StopAll()
+}

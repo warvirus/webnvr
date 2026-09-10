@@ -152,7 +152,7 @@ func RegisterHTTP(mux *http.ServeMux, app *App) {
 			writeJSON(w, http.StatusCreated, saved)
 
 		default:
-			methodNotAllowed(w, "GET, POST, PUT, DELETE")
+			methodNotAllowed(w, "GET, POST")
 		}
 	})
 
