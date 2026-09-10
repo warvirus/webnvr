@@ -322,10 +322,15 @@ func handleSegment(w http.ResponseWriter, req *http.Request, app *App, id, segID
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "세그먼트를 찾을 수 없습니다"})
 		return
 	}
-	root, err := app.recording.StorageRoot(seg.StorageIdx)
-	if err != nil {
-		writeErr(w, errInternal(err.Error()))
-		return
+	// 실제 쓰인 스토리지 경로(root_path)를 우선한다 — 설정 storages 순서가 바뀌어도
+	// 올바른 파일을 서빙한다. 빈 값(기존 행)은 storage_idx로 해석한다.
+	root := seg.RootPath
+	if root == "" {
+		root, err = app.recording.StorageRoot(seg.StorageIdx)
+		if err != nil {
+			writeErr(w, errInternal(err.Error()))
+			return
+		}
 	}
 	f, err := os.Open(filepath.Join(root, filepath.FromSlash(seg.RelPath)))
 	if err != nil {

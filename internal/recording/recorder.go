@@ -295,7 +295,7 @@ func (r *Recorder) TriggerEvent(typ string) (int64, error) {
 	r.evSink = sink
 	r.evSeg = &Segment{
 		CameraID: r.cameraID, Kind: "event",
-		StorageIdx: idx, RelPath: rel, Codec: string(r.codec),
+		StorageIdx: idx, RootPath: root, RelPath: rel, Codec: string(r.codec),
 	}
 	r.evTriggerTS = now
 	r.evType = typ
@@ -453,7 +453,7 @@ func (r *Recorder) openCurLocked(wallMS, pts int64) {
 	r.cur = sink
 	r.curSeg = &Segment{
 		CameraID: r.cameraID, Kind: "continuous",
-		StartTS: wallMS, StartPTS: pts, StorageIdx: idx,
+		StartTS: wallMS, StartPTS: pts, StorageIdx: idx, RootPath: root,
 		RelPath: rel, Flags: flags, Codec: string(r.codec),
 	}
 	r.openWall = wallMS

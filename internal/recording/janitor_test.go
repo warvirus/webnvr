@@ -1,6 +1,8 @@
 package recording
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"webnvr/internal/config"
@@ -148,5 +150,48 @@ func TestJanitorKeepMinHoursProtects(t *testing.T) {
 	rows, _ := s.Oldest(100)
 	if len(rows) != 5 {
 		t.Errorf("keep_min_hours 안쪽인데 삭제됨: %d행 남음 (want 5)", len(rows))
+	}
+}
+
+// TestJanitorDeletesViaRootPath — 행의 root_path가 있으면 storage_idx와 무관하게
+// 실제 파일이 있는 경로에서 삭제한다 (설정 storages 순서 변경 회귀, 3-1).
+func TestJanitorDeletesViaRootPath(t *testing.T) {
+	now := int64(100 * dayMS)
+	withFixedNow(t, now)
+	withFreePercent(t, 100)
+	s := newTestStore(t)
+
+	// 실제 파일이 있는 디렉토리 A
+	dirA := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dirA, "cam-1", "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rel := "cam-1/x/seg.ts"
+	abs := filepath.Join(dirA, filepath.FromSlash(rel))
+	if err := os.WriteFile(abs, make([]byte, 1024), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// storage_idx=0은 풀의 다른 디렉토리(B)를 가리킨다 — root_path가 없었다면
+	// B/seg.ts를 지우려 했을 것이다.
+	if _, err := s.Insert(Segment{
+		CameraID: "cam-1", StartTS: now - 8*dayMS, DurMS: 3600_000,
+		StorageIdx: 0, RootPath: dirA, RelPath: rel, Bytes: 1024, Codec: "h264",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.RecordingConfig{
+		Enabled: true, MaxUsageGB: 0, RetentionDays: 7, KeepMinHours: 0,
+		Storages: []config.StorageConfig{{Path: t.TempDir(), MinFreePercent: 0}},
+	}
+	j := NewJanitor(cfg, s, cfgPool(t, cfg.Storages), nil)
+	j.Sweep()
+
+	if _, err := os.Stat(abs); !os.IsNotExist(err) {
+		t.Errorf("root_path 경로의 파일이 삭제되지 않음: %v", err)
+	}
+	rows, _ := s.Oldest(10)
+	if len(rows) != 0 {
+		t.Errorf("행이 남음: %d", len(rows))
 	}
 }

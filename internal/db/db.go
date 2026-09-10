@@ -53,6 +53,10 @@ var migrations = []string{
 	CREATE INDEX idx_events_cam_ts ON events(camera_id, ts);`,
 	// #3 — Phase R 카메라별 녹화 모드. off면 녹화기가 생성되지 않는다.
 	camera.RecordColumnsSQL,
+	// #4 — 세그먼트에 실제 쓰인 스토리지 절대 경로 기록. 설정 storages 배열의 순서가
+	// 바뀌어도(재구성) 재생/삭제가 올바른 파일을 가리킨다. 빈 값(기존 행)은 기존처럼
+	// storage_idx로 해석한다.
+	`ALTER TABLE segments ADD COLUMN root_path TEXT NOT NULL DEFAULT '';`,
 }
 
 // DB는 열린 SQLite 연결과 설정 디렉토리를 감싼다.

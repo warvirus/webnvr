@@ -186,10 +186,16 @@ func (j *Janitor) isNewestFor(s Segment) bool {
 }
 
 func (j *Janitor) delete(s Segment) bool {
-	root, err := j.pool.Root(s.StorageIdx)
-	if err != nil {
-		slog.Error("janitor: 스토리지 해석 실패", "storage_idx", s.StorageIdx, "err", err)
-		return false
+	// 실제 쓰인 스토리지 경로(root_path)를 우선한다 — 설정 순서가 바뀌어도
+	// 올바른 파일을 삭제한다. 빈 값(기존 행)은 storage_idx로 해석한다.
+	root := s.RootPath
+	if root == "" {
+		var err error
+		root, err = j.pool.Root(s.StorageIdx)
+		if err != nil {
+			slog.Error("janitor: 스토리지 해석 실패", "storage_idx", s.StorageIdx, "err", err)
+			return false
+		}
 	}
 	if err := os.Remove(filepath.Join(root, filepath.FromSlash(s.RelPath))); err != nil && !os.IsNotExist(err) {
 		// 파일이 남으면 발자국 재계산이 틀어지므로 행도 남겨 재시도한다.

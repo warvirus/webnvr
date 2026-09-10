@@ -22,6 +22,7 @@ type Segment struct {
 	StartPTS   int64  // 90kHz
 	DurMS      int64
 	StorageIdx int
+	RootPath   string // 실제 쓰인 스토리지 절대 경로 — 설정 순서 변경과 무관하게 파일을 가리킴
 	RelPath    string
 	Bytes      int64
 	Flags      int
@@ -36,12 +37,12 @@ type Store struct {
 // NewStore는 열린 *sql.DB로 DAO를 만든다. (스키마는 internal/db 마이그레이션이 보장)
 func NewStore(db *sql.DB) *Store { return &Store{db: db} }
 
-const segCols = `id, camera_id, kind, start_ts, start_pts, dur_ms, storage_idx, rel_path, bytes, flags, codec`
+const segCols = `id, camera_id, kind, start_ts, start_pts, dur_ms, storage_idx, rel_path, bytes, flags, codec, root_path`
 
 func scanSeg(s interface{ Scan(...any) error }) (Segment, error) {
 	var g Segment
 	err := s.Scan(&g.ID, &g.CameraID, &g.Kind, &g.StartTS, &g.StartPTS, &g.DurMS,
-		&g.StorageIdx, &g.RelPath, &g.Bytes, &g.Flags, &g.Codec)
+		&g.StorageIdx, &g.RelPath, &g.Bytes, &g.Flags, &g.Codec, &g.RootPath)
 	return g, err
 }
 
@@ -51,9 +52,9 @@ func (s *Store) Insert(g Segment) (int64, error) {
 		g.Kind = "continuous"
 	}
 	res, err := s.db.Exec(
-		`INSERT INTO segments (camera_id, kind, start_ts, start_pts, dur_ms, storage_idx, rel_path, bytes, flags, codec)
-		 VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		g.CameraID, g.Kind, g.StartTS, g.StartPTS, g.DurMS, g.StorageIdx, g.RelPath, g.Bytes, g.Flags, g.Codec)
+		`INSERT INTO segments (camera_id, kind, start_ts, start_pts, dur_ms, storage_idx, rel_path, bytes, flags, codec, root_path)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		g.CameraID, g.Kind, g.StartTS, g.StartPTS, g.DurMS, g.StorageIdx, g.RelPath, g.Bytes, g.Flags, g.Codec, g.RootPath)
 	if err != nil {
 		return 0, fmt.Errorf("segments INSERT: %w", err)
 	}
