@@ -736,12 +736,15 @@ input, select { font-family: inherit; }
   50% { opacity: 0.25; }
 }
 
-/* ── 다시보기 카메라 선택 패널 (날짜별 녹화 현황) ── */
+/* ── 영상 검색 카메라 선택 패널 (세로 목록 — 좌측 컬럼 배치) ── */
 .cam-picker {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 8px;
   margin-top: 12px;
+  max-height: 62vh;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 .cam-pick {
   position: relative;
@@ -756,6 +759,7 @@ input, select { font-family: inherit; }
   border-radius: 8px;
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
+  flex: 0 0 auto;
 }
 .cam-pick:hover {
   background: rgba(255, 255, 255, 0.06);
@@ -888,10 +892,26 @@ input, select { font-family: inherit; }
   font-weight: 700;
 }
 
+/* ── 영상 검색 좌/우 2컬럼 레이아웃 ─────────────────────────
+   좌 = 녹화 현황(날짜/달력/채널 목록), 우 = 타임라인+재생. */
+.playback-layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  align-items: start;
+  gap: 18px;
+  width: 100%;
+}
+.playback-left { min-height: 0; }
+.playback-right { min-width: 0; }
+@media (max-width: 1100px) {
+  .playback-layout { grid-template-columns: 1fr; }
+}
+
 /* ── 영상 검색: 날짜 버튼 아래에 달력 오버레이(레이아웃 밀림 없음) ── */
 .date-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 4px;
 }

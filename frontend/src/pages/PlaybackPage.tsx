@@ -415,12 +415,12 @@ export function PlaybackPage() {
   const camOverview = overview.get(camId);
 
   return (
-    <>
-      <section className="discovery" aria-label="영상 검색">
+    <div className="playback-layout">
+      <section className="discovery playback-left" aria-label="영상 검색">
         <div className="discovery-head">
-          <span className="discovery-hint">
+          <span className="discovery-hint" style={{marginLeft: 0}}>
             {fmtDay(dayStart)} 녹화 {dayWithRec ? `${overview.size}대 · ${fmtBytes(totalDayBytes)}` : '없음'}
-            {status && <> · 전체 사용량 {fmtBytes(status.usedBytes)} · 녹화 중 {status.recording.length}대</>}
+            {status && <>{' · '}전체 사용량 {fmtBytes(status.usedBytes)} · 녹화 중 {status.recording.length}대</>}
           </span>
         </div>
 
@@ -462,9 +462,9 @@ export function PlaybackPage() {
           </button>
         </div>
 
-        {/* 채널별 녹화 현황 — 클릭 시 자동 표시 (1-1~1-4) */}
+        {/* 채널별 녹화 현황 — 세로 목록, 클릭 시 자동 표시 (1-1~1-4) */}
         <div className="cam-picker" role="listbox" aria-label="채널별 녹화 현황">
-          {ordered.length === 0 && <div className="empty" style={{flex: 1}}>등록된 카메라가 없습니다.</div>}
+          {ordered.length === 0 && <div className="empty">등록된 카메라가 없습니다.</div>}
           {ordered.map((c, i) => {
             const ov = overview.get(c.id);
             const active = c.id === camId;
@@ -485,6 +485,9 @@ export function PlaybackPage() {
           })}
         </div>
 
+      </section>
+
+      <section className="discovery playback-right" aria-label="재생">
         {/* 줌 컨트롤 + 타임라인 (2-1 휠 줌/드래그 팬, 2-2 붉은 커서) */}
         <div className="tl-toolbar">
           <span className="tl-zoom-label">{zoomed ? `윈도우 ${fmtSpan(viewSpan)} · 실제 녹화 ${fmtDur(winDur)}` : '전체 24시간'}</span>
@@ -543,9 +546,8 @@ export function PlaybackPage() {
             {seekTs !== null && nowLabel && <> · 재생 위치 {nowLabel}</>}
           </div>
         )}
-      </section>
 
-      <section className="discovery" aria-label="재생">
+
         <div className="discovery-head">
           <h3>재생{selectedCam ? ` — ${selectedCam.name}` : ''}</h3>
           {hasRecording && (
@@ -570,6 +572,6 @@ export function PlaybackPage() {
           실시간 녹화는 재생이 구간 끝에 도달하면 자동으로 이어서 재생됩니다.
         </div>
       </section>
-    </>
+    </div>
   );
 }
