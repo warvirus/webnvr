@@ -203,7 +203,7 @@ func (s *Server) mux() http.Handler {
 
 // serveConn은 연결별 읽기 루프와 하트비트를 실행한다.
 func (s *Server) serveConn(conn *websocket.Conn) {
-	st := &connState{conn: conn, cancels: map[string]func(){}}
+	st := &connState{conn: conn, cancels: map[string]func(){}, ptzMoving: map[string]struct{}{}}
 	s.mu.Lock()
 	s.conns[st] = struct{}{}
 	s.mu.Unlock()
@@ -211,7 +211,7 @@ func (s *Server) serveConn(conn *websocket.Conn) {
 		s.mu.Lock()
 		delete(s.conns, st)
 		s.mu.Unlock()
-		st.cleanupAll()
+		st.cleanupAll(s.ctrl)
 		_ = conn.Close()
 	}()
 

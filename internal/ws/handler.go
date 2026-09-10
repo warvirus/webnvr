@@ -28,8 +28,9 @@ type connState struct {
 	conn *websocket.Conn
 	wmu  sync.Mutex // 쓰기 직렬화
 
-	mu      sync.Mutex
-	cancels map[string]func() // cameraID → 구독 해제
+	mu        sync.Mutex
+	cancels   map[string]func()   // cameraID → 구독 해제
+	ptzMoving map[string]struct{} // 연속 이동 중인 카메라 — 연결 끊김 시 정지 전송용
 }
 
 // sendRaw는 임의 메시지를 직렬화해 전송한다. (쓰기 락 보호)
@@ -216,7 +217,9 @@ func (s *connState) handleClientMsg(ctrl Controller, m ClientMsg) {
 		}
 		if err := ctrl.PTZ(m.CameraID, *m.Command); err != nil {
 			s.handleError(m.CameraID, err.Error())
+			return
 		}
+		s.notePTZ(m.CameraID, *m.Command)
 	case MsgRequestKeyframe:
 		// RTSP 컨트롤 채널로 키프레임 요청은 카메라별 지원이 달라 추후 구현한다.
 		slog.Debug("request_keyframe 미지원", "camera", m.CameraID)
@@ -257,14 +260,48 @@ func (s *connState) unsubscribe(cameraID string) {
 	}
 }
 
-// cleanupAll은 연결 종료 시 모든 구독을 해제한다.
-func (s *connState) cleanupAll() {
+// notePTZ는 PTZ 명령 성공 후 이동 상태를 추적한다. 연속 이동(move, 속도 0 제외) 중인
+// 카메라는 연결이 끊길 때 정지 명령을 받아야 카메라가 범위 끝까지 회전하지 않는다.
+func (s *connState) notePTZ(cameraID string, cmd PTZCommand) {
+	moving := cmd.Action == "move" && (cmd.Pan != 0 || cmd.Tilt != 0 || cmd.Zoom != 0)
+	s.mu.Lock()
+	if moving {
+		if s.ptzMoving == nil {
+			s.ptzMoving = map[string]struct{}{}
+		}
+		s.ptzMoving[cameraID] = struct{}{}
+	} else {
+		delete(s.ptzMoving, cameraID)
+	}
+	s.mu.Unlock()
+}
+
+// cleanupAll은 연결 종료 시 모든 구독을 해제하고, 이동 중이던 PTZ를 정지시킨다.
+// 정지 전송은 best-effort(별도 goroutine, 짧은 타임아웃) — 연결 정리를 막지 않는다.
+// 주의: 두 클라이언트가 같은 카메라를 조작 중이면 한쪽 종료가 다른 쪽 이동도
+// 정지시킨다 — 러너웨이 방지가 우선이라는 정책 선택이다.
+func (s *connState) cleanupAll(ctrl Controller) {
 	s.mu.Lock()
 	cancels := s.cancels
 	s.cancels = map[string]func(){}
+	moving := make([]string, 0, len(s.ptzMoving))
+	for id := range s.ptzMoving {
+		moving = append(moving, id)
+	}
+	s.ptzMoving = map[string]struct{}{}
 	s.mu.Unlock()
 	for _, cancel := range cancels {
 		cancel()
+	}
+	for _, cameraID := range moving {
+		go func(id string) {
+			// ctrl.PTZ 내부에 5초 타임아웃이 있다 — 이 goroutine은 정리를 막지 않는다.
+			if err := ctrl.PTZ(id, PTZCommand{Action: "stop"}); err != nil {
+				slog.Warn("연결 종료 시 PTZ 정지 실패", "camera", id, "err", err)
+			} else {
+				slog.Info("연결 종료 — PTZ 정지 전송", "camera", id)
+			}
+		}(cameraID)
 	}
 }
 

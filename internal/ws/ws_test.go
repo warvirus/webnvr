@@ -465,3 +465,40 @@ func TestReloadStreamMessage(t *testing.T) {
 		t.Errorf("ReloadStream 전달 불일치: %v", ctrl.reloaded)
 	}
 }
+
+// TestPTZStopOnDisconnect — PTZ 연속 이동 중 연결이 끊기면 서버가 정지 명령을
+// 대신 전송한다 (카메라 러너웨이 방지, 3-3 회귀).
+func TestPTZStopOnDisconnect(t *testing.T) {
+	ctrl := newFakeController()
+	srv := newTestServer(t, ctrl)
+	c := connect(t, srv)
+
+	if err := c.WriteJSON(ClientMsg{
+		Type:     MsgPTZ,
+		CameraID: "cam-1",
+		Command:  &PTZCommand{Action: "move", Pan: 0.5},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	c.Close() // 이동 중 연결 끊김
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		ctrl.mu.Lock()
+		n := len(ctrl.ptzCmds)
+		last := PTZCommand{}
+		if n > 0 {
+			last = ctrl.ptzCmds[n-1]
+		}
+		ctrl.mu.Unlock()
+		if n >= 2 && last.Action == "stop" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("연결 끊김 후 PTZ 정지 미전송: %+v", ctrl.ptzCmds)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
