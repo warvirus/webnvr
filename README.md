@@ -3,7 +3,7 @@
 ONVIF 카메라 자동 검색 · 멀티뷰 실시간 스트리밍 · PTZ 제어 데스크톱 앱.
 
 - 아키텍처 = Wails v2 셸(창) + Go 백엔드 + React/TS 프론트엔드
-- 백엔드가 `:8080` 하나로 REST API(`/api/*`) + 스트림 중계 WS(`/ws`) + 프론트엔드 UI(`/`)를 모두 서빙한다
+- 백엔드가 `:25480` 하나로 REST API(`/api/*`) + 스트림 중계 WS(`/ws`) + 프론트엔드 UI(`/`)를 모두 서빙한다
 - 프론트엔드는 백엔드에 `fetch` / WebSocket 으로만 접속한다 (Wails 바인딩 미사용)
 - 상세 설계는 `doc/architecture.md` 참조
 
@@ -25,7 +25,7 @@ wails dev
 ```
 
 Wails 창이 뜨고, 프론트엔드 변경이 즉시 반영된다. 브라우저로 디버깅하려면
-`http://localhost:34115` 에 접속한다.
+`http://localhost:25480` 에 접속한다.
 
 ### 2. 백엔드만 실행 (데스크톱 창 없이)
 
@@ -37,7 +37,7 @@ go run ./cmd/server
 go build -o webnvr-server ./cmd/server && ./webnvr-server
 ```
 
-- `frontend/dist` 가 있으면 `http://localhost:8080/` 로 빌드된 UI 도 함께 서빙한다
+- `frontend/dist` 가 있으면 `http://localhost:25480/` 로 빌드된 UI 도 함께 서빙한다
   (없으면 `/api/*` 와 `/ws` 만 제공 — `cd frontend && npm run build` 후 재실행)
 - `Ctrl+C` 로 종료
 
@@ -46,6 +46,42 @@ go build -o webnvr-server ./cmd/server && ./webnvr-server
 ```bash
 ./build/bin/webnvr.app/Contents/MacOS/webnvr -headless
 ```
+
+#### Windows 에서 백엔드 실행
+
+백엔드(REST API + WS + UI 서빙) 는 Windows 를 정식 지원한다 (순수 Go SQLite +
+디스크 여유 측정용 build-tag 로 CGO 불필요) . 창(데스크톱 앱) 버전은 Wails 전용
+도구가 추가로 필요하므로, Windows 에서는 아래 헤드리스 실행을 권장한다.
+
+1. 사전 준비 (PowerShell) 는 다음과 같다.
+   - Go 1.27+ 설치 — <https://go.dev/dl/> ( 설치 후 터미널 재시작 )
+   - Node 20+ 설치 — <https://nodejs.org/> ( 프론트엔드 빌드용 )
+2. 저장소 루트에서 실행한다.
+
+```powershell
+# (1) 프론트엔드 빌드 — http://localhost:<포트>/ 로 UI 도 서빙하려면 1 회만 수행
+cd frontend ; npm install ; npm run build ; cd ..
+
+# (2) 바로 실행 ( 개발/테스트용 )
+go run .\cmd\server
+
+# (3) 상주용 바이너리
+go build -o webnvr-server.exe .\cmd\server
+.\webnvr-server.exe
+```
+
+3. 첫 실행 시 Windows Defender 방화벽이 "어플리케이션 허용" 을 물어보면 **private 네트워크 허용**
+   을 선택한다. 같은 LAN 의 다른 기기에서 `http://<서버IP>:8080` 접속이 안 되면
+   규칙 확인이 필요하면 아래로 포트를 허용한다.
+
+```powershell
+New-NetFirewallRule -DisplayName "webnvr" -Direction Inbound -Action Allow `
+  -Protocol TCP -LocalPort 8080
+```
+
+- 종료는 `Ctrl+C` (진행 중 녹화 세그먼트는 정상 종료 경로로 flush 된다) .
+- 설정/DB 는 macOS 와 동일하게 실행 위치의 `config\` 를 상대 경로로 읽는다 —
+  반드시 **저장소 루트** 에서 실행할 것. 포트·바인드·자동 재바인딩 동작은 위와 같다.
 
 ### 3. 프론트엔드만 개발 서버로
 
@@ -56,7 +92,7 @@ cd frontend && npm run dev
 ```
 
 `http://localhost:5173` 접속 시 `services/backend.ts` 가 접속 호스트를 기준으로
-`:8080` 백엔드에 자동 연결한다 (백엔드가 CORS 허용).
+`:25480` 백엔드에 자동 연결한다 (백엔드가 CORS 허용).
 
 ## 빌드
 
@@ -73,7 +109,7 @@ HTTPS 로 띄우려면 `WEB_CERT` / `WEB_KEY` 환경변수에 인증서 경로�
 
 | 키 | 기본값 | 설명 |
 |----|--------|------|
-| `server.ws_port` | `8080` | HTTP/WS/UI 공용 포트 |
+| `server.ws_port` | `25480` | HTTP/WS/UI 공용 포트 |
 | `server.tls_port` | `8443` | HTTPS/WSS 보조 포트 (`WEB_CERT`/`WEB_KEY` 설정 시) |
 | `server.bind` | `0.0.0.0` | 바인드 주소. `127.0.0.1` = 로컬 전용, `0.0.0.0` = LAN 공개 |
 | `server.max_clients` | `4` | 동시 접속 제한 |
@@ -83,7 +119,7 @@ HTTPS 로 띄우려면 `WEB_CERT` / `WEB_KEY` 환경변수에 인증서 경로�
 
 ## 공유기 포트 포워딩 — 외부망에서 접속하기
 
-서버는 `server.bind:server.ws_port` (기본 `0.0.0.0:8080`, DDNS 운영 시 `25480` 등) 에서
+서버는 `server.bind:server.ws_port` (기본 `0.0.0.0:25480`, DDNS 운영 시 `25480` 등) 에서
 수신한다. 이 프로그램이 **공유기 내부(사설 IP)** 에서 돌면 외부 인터넷에서는 도달할 수
 없으므로, iptime 공유기에 **포트 포워딩** 규칙을 추가해 내부 서버 PC로 연결을 전달해야 한다.
 
@@ -97,7 +133,7 @@ HTTPS 로 띄우려면 `WEB_CERT` / `WEB_KEY` 환경변수에 인증서 경로�
 |------|-----------|
 | 서버 포트/내부 IP | 서버 로그의 `LAN 접속 가능: http://192.168.x.x:<포트>` 줄 (기동 시 출력) |
 | 공유기 관리자 | 내부 브라우저에서 `http://192.168.0.1` 접속 (아이디/비밀번호는 공유기 설정 시 지정한 값) |
-| DDNS | `warvirus.iptime.org` 처럼 공유기 DDNS 설정이 활성화돼 있어야 한다 |
+| DDNS | `your_id.iptime.org` 처럼 공유기 DDNS 설정이 활성화돼 있어야 한다 |
 | 공인 IP 여부 | 공유기 상태 정보의 **WAN IP** 와 외부 "내 IP" 검색 사이트의 값이 같아야 한다. `100.64.x.x` ~ `100.127.x.x` 등 사설 대역이면 ISP 가 CGNAT 를 쓰는 것 — 포워딩으로도 외부 접속이 불가하니 ISP 에 공인 IP 를 요청해야 한다 |
 
 ### 1. 내부 IP 고정 (DHCP 예약)
@@ -130,11 +166,11 @@ HTTPS 로 띄우려면 `WEB_CERT` / `WEB_KEY` 환경변수에 인증서 경로�
 
 ```bash
 # 외부 회선 (스마트폰 LTE 등, 공유기 망 밖) 에서
-curl http://warvirus.iptime.org:25480/api/health
+curl http://your_id.iptime.org:25480/api/health
 # → {"ok":true,"version":1}
 ```
 
-- 브라우저: `http://warvirus.iptime.org:25480` → 로그인 없이 모니터링 화면이 뜨면 성공
+- 브라우저: `http://your_id.iptime.org:25480` → 로그인 없이 모니터링 화면이 뜨면 성공
 - **내부망에서 도메인 접속은 공유기 NAT 루프백 지원 여부에 따라 동작이 갈린다.**
   실패하면 내부에서는 `http://192.168.0.217:25480` 로 접속하면 된다.
 - 안 되면 확인 순서는 다음과 같다. ①서버가 `0.0.0.0` 으로 바인드됐는지 (`bind` 설정) ②공유기 포트포워드
