@@ -13,9 +13,9 @@
 //
 // Wails 셸은 가상 호스트(wails.localhost)라 same-origin으로 백엔드에 도달할 수 없다.
 // 셸의 assetserver 미들웨어가 index.html에 window.__WEBNVR_BACKEND_PORT__를
-// 주입하며, 값은 config ws_port다(미주입 시 8080 폴백).
+// 주입하며, 값은 config ws_port다(미주입 시 25480 폴백).
 
-const WAILS_FALLBACK_PORT = 8080;
+const WAILS_FALLBACK_PORT = 25480;
 
 // isWailsShell은 Wails 네이티브 셸 컨텍스트인지 판정한다 (가상 호스트).
 export function isWailsShell(): boolean {

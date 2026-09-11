@@ -1,5 +1,5 @@
 // webnvr Wails 앱의 진입점이다. Wails는 창(셸) 역할만 하며,
-// 프론트엔드는 백엔드의 HTTP API(8080)와 WS로 통신한다 (doc v1.1 §5).
+// 프론트엔드는 백엔드의 HTTP API(25480)와 WS로 통신한다 (doc v1.1 §5).
 package main
 
 import (

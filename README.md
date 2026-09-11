@@ -72,12 +72,12 @@ go build -o webnvr-server.exe .\cmd\server
 ```
 
 3. 첫 실행 시 Windows Defender 방화벽이 "어플리케이션 허용" 을 물어보면 **private 네트워크 허용**
-   을 선택한다. 같은 LAN 의 다른 기기에서 `http://<서버IP>:8080` 접속이 안 되면
+   을 선택한다. 같은 LAN 의 다른 기기에서 `http://<서버IP>:25480` 접속이 안 되면
    규칙 확인이 필요하면 아래로 포트를 허용한다.
 
 ```powershell
 New-NetFirewallRule -DisplayName "webnvr" -Direction Inbound -Action Allow `
-  -Protocol TCP -LocalPort 8080
+  -Protocol TCP -LocalPort 25480
 ```
 
 - 종료는 `Ctrl+C` (진행 중 녹화 세그먼트는 정상 종료 경로로 flush 된다) .

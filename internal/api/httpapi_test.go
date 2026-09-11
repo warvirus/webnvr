@@ -274,7 +274,7 @@ func TestHTTPConfig(t *testing.T) {
 	// 유효한 전체 교체
 	status, savedAny := doJSON(t, http.MethodPut, srv.URL+"/api/config", map[string]any{
 		"version": 1,
-		"server":  map[string]any{"ws_port": 8080, "http_port": 8081},
+		"server":  map[string]any{"ws_port": 25480, "http_port": 8081},
 		"stream":  map[string]any{"default_transport": "udp", "rtp_timeout_ms": 5000, "jitter_buffer_ms": 150, "max_concurrent_streams": 20},
 		"decoder": map[string]any{"prefer_hardware": true, "max_threads": 4},
 		"logging": map[string]any{"level": "info", "file": "logs/app.log", "max_size_mb": 100, "max_backups": 5},

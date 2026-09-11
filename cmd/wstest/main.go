@@ -1,6 +1,6 @@
 // Phase 4 WS 파이프라인 end-to-end 검증 클라이언트
 // 사용법: go run ./cmd/wstest <cameraId> [seconds]
-// 백엔드 포트는 BACKEND_PORT 환경변수로 지정 (기본 8080)
+// 백엔드 포트는 BACKEND_PORT 환경변수로 지정 (기본 25480)
 package main
 
 import (
@@ -30,7 +30,7 @@ func main() {
 	}
 	port := os.Getenv("BACKEND_PORT")
 	if port == "" {
-		port = "8080"
+		port = "25480"
 	}
 
 	ws, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf("ws://127.0.0.1:%s/ws", port), nil)

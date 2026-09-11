@@ -87,7 +87,7 @@ func Default() *AppConfig {
 	return &AppConfig{
 		Version: CurrentVersion,
 		Server: ServerConfig{
-			WSPort:     8080,
+			WSPort:     25480,
 			TLSPort:    8443,
 			HTTPPort:   8081,
 			Bind:       "0.0.0.0",

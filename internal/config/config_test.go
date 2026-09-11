@@ -15,8 +15,8 @@ func TestDefault(t *testing.T) {
 	if cfg.Version != 1 {
 		t.Errorf("Version = %d, want 1", cfg.Version)
 	}
-	if cfg.Server.WSPort != 8080 || cfg.Server.HTTPPort != 8081 {
-		t.Errorf("Server = %+v, want ws 8080 / http 8081", cfg.Server)
+	if cfg.Server.WSPort != 25480 || cfg.Server.HTTPPort != 8081 {
+		t.Errorf("Server = %+v, want ws 25480 / http 8081", cfg.Server)
 	}
 	if cfg.Stream.DefaultTransport != "tcp" || cfg.Stream.JitterBufferMS != 150 {
 		t.Errorf("Stream = %+v", cfg.Stream)

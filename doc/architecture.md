@@ -146,7 +146,7 @@ cctv-control/
 ## 5. 백엔드 API 계약 (HTTP REST + WebSocket)
 
 > **v1.1 아키텍처 개정 (2026-08-31)**: 프론트엔드는 백엔드의 **순수 클라이언트**다.
-> 카메라 설정/관리는 HTTP REST API(`:8080/api/*`)로, 영상은 WS(`:8080/ws`)로 모두
+> 카메라 설정/관리는 HTTP REST API(`:25480/api/*`)로, 영상은 WS(`:25480/ws`)로 모두
 > 서버 경유 — Wails 바인딩은 제거되며 Wails는 창(셸) 역할만 한다.
 > 이로써 네이티브 앱과 DevServer 브라우저가 동일한 경로로 동작한다(브라우저 패리티).
 
@@ -312,7 +312,7 @@ interface UIStore {
 |---|--------|
 | R.1 | HTTP REST API (`/api/*`) — §5.1 계약, httptest |
 | R.2 | 프론트엔드 services/api.ts 전환 — Wails 바인딩 의존 제거 |
-| R.3 | main.go Bind 제거 (Wails = 셸), 8080 점유 시 명확한 종료 |
+| R.3 | main.go Bind 제거 (Wails = 셸), 25480 점유 시 명확한 종료 |
 | R.4 | DevServer 브라우저 패리티 실기 확인 |
 
 ### Phase 5: 폴리싱 + 통계 (예정)
@@ -342,7 +342,7 @@ interface UIStore {
 ```json
 {
   "version": 1,
-  "server": { "ws_port": 8080, "http_port": 8081 },
+  "server": { "ws_port": 25480, "http_port": 8081 },
   "stream": {
     "default_transport": "tcp",
     "rtp_timeout_ms": 5000,
@@ -471,8 +471,8 @@ ffmpeg.wasm 폴백(Phase 5 검토) 도입 시 재사용한다. 현재 미구현.
 | Wails WebView 버전 차이 | 낮음 | 높음 | 최소 버전 강제 (WebView2 109+, WebKit 614+) |
 | RTMP 풀링 구현 복잡도 | 중간 | 중간 | 미구현(타입만 지원), 필요시 Phase 5+ |
 | WS 버스트로 인한 유실 | **해소** | 높음 | rtp_batch 배치 전송 + 허브 버퍼 512패킷 — 실측 0.00% (v1.1) |
-| 8080 포트 충돌 | 중간 | 중간 | v1.1: 점유 시 명확한 오류와 함께 종료 (고정 포트 정책) |
-| CORS (DevServer→8080) | 중간 | 낮음 | 모든 오리진 허용 + 127.0.0.1 바인딩 한정, Phase 6 인증에서 재검토 |
+| 25480 포트 충돌 | 중간 | 중간 | v1.1: 점유 시 명확한 오류와 함께 종료 (고정 포트 정책) |
+| CORS (DevServer→25480) | 중간 | 낮음 | 모든 오리진 허용 + 127.0.0.1 바인딩 한정, Phase 6 인증에서 재검토 |
 | 마스터 키 미설정 | 확인됨 | 중간 | 폴백 키 동작(경고 로그). Phase 5/6에서 키 관리 방안 확정 |
 
 ---
@@ -504,8 +504,8 @@ go run ./cmd/rtspanalyze -camera <id>      # 실기 NALU 구조 분석
 go run ./cmd/rtspmock        # 모의 RTSP 서버 (STAP-A + FU-A 분할 IDR)
 
 # HTTP API 확인 (v1.1)
-curl http://127.0.0.1:8080/api/health
-curl http://127.0.0.1:8080/api/cameras
+curl http://127.0.0.1:25480/api/health
+curl http://127.0.0.1:25480/api/cameras
 ```
 
 ---
