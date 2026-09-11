@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |------|------|
-| 문서 버전 | v1.2 (영상 검색 명세 §6ter 추가, 2026-09-10) |
+| 문서 버전 | v1.2.1 (Discovery 검색 영역 명시, 2026-09-11) |
 | 작성일 | 2026-09-03 (v1.1 개정 2026-09-10) |
 | 기준 커밋 | HEAD `25e2f56` (Phase 1~5 + R.1~R.5 녹화 + 영상 검색 강화) |
 | 대체 대상 | `doc/architecture.md` (내부 버전 1.1, 2026-08-31) — 본 문서가 정식본이다 |
@@ -29,7 +29,7 @@
 
 ### 1.2 핵심 설계 원칙
 
-1. **서버 중심 · 단일 포트** — 백엔드가 `server.bind:server.ws_port`(기본 `0.0.0.0:8080`) 하나로
+1. **서버 중심 · 단일 포트** — 백엔드가 `server.bind:server.ws_port`(기본 `0.0.0.0:25480`) 하나로
    REST API(`/api/*`), 스트림 중계 WebSocket(`/ws`), 프론트엔드 UI(`/`)를 모두 서빙한다.
    HTTPS/WSS는 `WEB_CERT`/`WEB_KEY` 환경변수가 있을 때 `:8443`에서 추가로 뜬다.
 2. **브라우저 패리티** — 프론트엔드는 Wails 바인딩을 쓰지 않고 `fetch` + `WebSocket`만 쓴다.
@@ -125,7 +125,7 @@
         │                            │   internal/ws  pump: 채널 대기 패킷 즉시 흡수      │
         │                            │        → rtp_batch (≤128패킷/묶음)              │
         │                            │                       │                        │
-        │           AccessLog( CORS( http.ServeMux ) )  ─ 단일 리스너 :8080 ─           │
+        │           AccessLog( CORS( http.ServeMux ) )  ─ 단일 리스너 :25480 ─           │
         │            ├── /ws       (WebSocket: 스트림 중계 + 제어 + PTZ)                │
         │            ├── /api/*    (REST: 카메라/설정/백업/보안)                        │
         │            └── /         (임베디드 SPA, 없는 경로는 index.html 폴백)          │
@@ -165,7 +165,7 @@
 | 데스크톱 프로덕션 | `wails build` → `webnvr.app` | O | 임베디드 `frontend/dist` (`fs.Sub`로 서브루팅) |
 | 헤드리스 백엔드 | `go run ./cmd/server` | X | `frontend/dist` 있으면 디스크 서빙, 없으면 API/WS만 |
 | 데스크톱 바이너리 헤드리스 | `./webnvr -headless` | X | 임베디드 `frontend/dist` |
-| 프론트 개발 병행 | `cd frontend && npm run dev` | — | Vite 5173, `backend.ts`가 `:8080` 백엔드에 자동 연결 |
+| 프론트 개발 병행 | `cd frontend && npm run dev` | — | Vite 5173, `backend.ts`가 `:25480` 백엔드에 자동 연결 |
 
 `cmd/server`는 순수 Go라 CGO/WebKit 링크 없이 빌드된다(`CGO_ENABLED=0` 확인됨).
 
@@ -221,8 +221,8 @@ third_party/gortsplib/   패치된 gortsplib v4.16.2 로컬 복사본 (go.mod re
 
 | 그룹 | 필드 (json) | 타입 | 기본값 |
 |------|------------|------|--------|
-| server | `ws_port` | int | `8080` |
-| server | `http_port` | int | `8081` (사실상 미사용 — v1.1에서 8080 단일화) |
+| server | `ws_port` | int | `25480` |
+| server | `http_port` | int | `8081` (사실상 미사용 — v1.1에서 25480 단일화) |
 | server | `bind` | string | `"0.0.0.0"` |
 | server | `max_clients` | int | `0` (0 = 무제한) |
 | stream | `default_transport` | string | `"tcp"` |
@@ -266,7 +266,7 @@ third_party/gortsplib/   패치된 gortsplib v4.16.2 로컬 복사본 (go.mod re
 | 파일 | 역할 | 방식 |
 |------|------|------|
 | `client.go` | `New`(생성 시 `GetCapabilities`로 도달성 확인), `DeviceInformation` | SDK 헬퍼 |
-| `discovery.go` | WS-Discovery — 인터페이스별 순차 프로브(내부 ~1초), XAddrs/Scopes 파싱, 포트 없는 주소 제외, 이름은 `onvif://.../name/...`에서 추출 | 라이브러리 + 수동 XML |
+| `discovery.go` | WS-Discovery — 인터페이스별 순차 프로브(내부 ~1초), XAddrs/Scopes 파싱, 포트 없는 주소 제외, 이름은 `onvif://.../name/...`에서 추출. **프로브는 백엔드 프로세스가 실행 중인 머신의 NIC로 전송된다 — 검색 영역은 백엔드 네트워크이며, 클라이언트(브라우저) 네트워크가 아니다** | 라이브러리 + 수동 XML |
 | `profiles.go` | `Profiles` → `{Token,Name,Width,Height}` | **raw `CallMethod` + 커스텀 파서** |
 | `stream_uri.go` | `StreamURI(profileToken, "RTSP")` | SDK 헬퍼 |
 | `ptz.go` | `ContinuousMove` / `Stop` / `GotoPreset` = SDK, `Presets` = **raw SOAP** | 혼합 |
@@ -332,7 +332,7 @@ third_party/gortsplib/   패치된 gortsplib v4.16.2 로컬 복사본 (go.mod re
 - **`components/layout/Toolbar.tsx`** — 항상 `.header-eyebrow` + `<h1>`를 그리고(페이지별 `titles` 맵: `Live Grid`/`모니터링`, `Camera Registry`/`카메라 등록부`, `Preferences`/`설정`), 페이지에 따라 컨트롤을 붙인다.
   - `management` — `등록 NN · 사용 NN` 카운트 + `카메라 추가` 기본 버튼(`openCameraModal({mode:'add'})`).
   - `monitoring`(카메라가 있을 때) — `스트리밍 NN / NN` + 전체 kbps/fps/드롭 요약, 분할 버튼 그룹 `[A][1][4][9][16][25]`(`GRID_OPTIONS`, 활성 항목 `.btn-active` 앰버색), 페이지가 여럿이면 `‹ page/total ›` 페이저, 전체화면 토글(`IconFull`).
-- **`components/layout/StatusBar.tsx`** — **현재는 정적 플레이스홀더**다. `WS 127.0.0.1:8080`, `● 백엔드 연결됨`, `스트림 0/0`, `webnvr v0.1`을 하드코딩하며 스토어를 구독하지 않는다(실시간화는 미완).
+- **`components/layout/StatusBar.tsx`** — **현재는 정적 플레이스홀더**다. `WS 127.0.0.1:25480`, `● 백엔드 연결됨`, `스트림 0/0`, `webnvr v0.1`을 하드코딩하며 스토어를 구독하지 않는다(실시간화는 미완).
 
 ### 4.2 컴포넌트 트리
 
@@ -391,7 +391,7 @@ App
 | `CameraCard`(내부) | OSD 카드 — 모서리 꺾쇠 4개, `CH NN` 플레이트, 타입 배지, 상태 점(`사용`/`중지`), 이름/호스트, 메타 태그(`PTZ`/전송/`인증 저장됨`/`#group`). 사용 토글은 `updateCamera({enabled})` 낙관적. 삭제는 **2단계** — `삭제` → `삭제 확인`/`취소`. 드래그 핸들 `IconGrip`. 편집 → `openCameraModal({mode:'edit'})`. |
 | `CameraModal` | `.overlay` + `.modal`(`role="dialog"`). 배경 클릭 시 닫힘. `handleSubmit` — add는 `addCamera`, edit는 `updateCamera`(비밀번호는 **입력값이 있을 때만** 요청에 포함, `profileToken`은 ONVIF일 때만). 성공/실패 토스트 후 `closeCameraModal`. |
 | `CameraForm` | 타입 라디오(`ONVIF`/`RTSP`/`RTP`/`RTMP`) → 필드 동적 표시. `canSubmit`(메모)와 `validate`(한국어 오류 목록)로 제출 게이트. `runTest` — ONVIF는 `testONVIF`, 직접은 `testDirectStream`. `previewURI`(edit+ONVIF) — `getCameraStreamURI`. 아무 편집이나 하면 이전 테스트 결과 무효화. |
-| `DiscoveryPanel` | `네트워크 검색` 버튼 → `discover()`. 약 3초 스캔. 결과 없으면 `검색 결과가 없습니다…` 토스트. 각 결과는 IP + 이름 + `추가` 버튼(`openCameraModal({mode:'add', presetXAddr})`). |
+| `DiscoveryPanel` | `네트워크 검색` 버튼 → `discover()`. 약 3초 스캔 — **검색은 백엔드 서버의 네트워크 영역에서 수행됨(클라이언트 네트워크 아님)을 힌트 문구로 명시**. 결과 없으면 `검색 결과가 없습니다…` 토스트. 각 결과는 IP + 이름 + `추가` 버튼(`openCameraModal({mode:'add', presetXAddr})`). |
 | `ProfileSelector` | `profiles === null`이면 `프로필 불러오기` 버튼만. 로드 후 `role="listbox"`로 프로필 목록(이름/토큰/해상도), 선택 없으면 첫 항목 자동 선택. 등록 카메라는 `getCameraProfiles(id)`(저장 자격증명), 미등록은 `getProfiles({xaddr,username,password})`. |
 | `ConnectionTest` | 순수 표시. `TestState` 유니온 — `idle`(null) / `testing`(`연결을 확인하는 중… (최대 10초)`) / `onvif-ok`(제조사·모델·펌웨어) / `direct-ok`(`스트림 주소에 연결됨`) / `fail`(원인 + `다시 시도`). |
 
@@ -459,7 +459,7 @@ App
 #### `services/backend.ts` — 백엔드 주소 결정
 
 - `backendHost()` — `location.hostname` 소문자. 빈 값이거나 `wails.localhost`/`*.wails.localhost`(Wails 가상 호스트, 라우팅 불가)면 `'127.0.0.1'`, 그 외엔 그대로(LAN IP / localhost / 동일 오리진).
-- `backendPort()` — `location.protocol === 'https:' ? 8443 : 8080` (**포트 하드코딩** — 외부 접근 시 주의, §9.3).
+- `backendPort()` — `location.protocol === 'https:' ? 8443 : 25480` (**포트 하드코딩** — 외부 접근 시 주의, §9.3).
 - `backendBase()` / `backendWS()` — `${http|https}://host:port` / `${ws|wss}://host:port/ws`.
 
 #### `services/decoder.ts` — 디코드 파이프라인 (메인 스레드)
@@ -522,7 +522,7 @@ App
 
 ### 5.1 HTTP REST (`/api/*`)
 
-기본 URL은 `backendBase()`(네이티브 `http://127.0.0.1:8080`, 브라우저는 접속 오리진). 전 오리진 CORS 허용, `OPTIONS` → 204.
+기본 URL은 `backendBase()`(네이티브 `http://127.0.0.1:25480`, 브라우저는 접속 오리진). 전 오리진 CORS 허용, `OPTIONS` → 204.
 
 | 메서드 | 경로 | 용도 | 반환 / 상태코드 |
 |--------|------|------|-----------------|
@@ -533,7 +533,7 @@ App
 | PUT | `/api/cameras/{id}` | 수정 (비밀번호 입력 시 재암호화) | `200 CameraDTO` · 404 / 400 |
 | DELETE | `/api/cameras/{id}` | 삭제 | `200 {ok:true}` · 404 |
 | POST | `/api/cameras/reorder` | 순서 변경 `{ids:[]}` | `200 {ok:true}` · 400 · 비POST 405 |
-| POST | `/api/cameras/discover` | ONVIF WS-Discovery | `200 DiscoveredCamera[]` · 비POST 405 |
+| POST | `/api/cameras/discover` | ONVIF WS-Discovery — **백엔드의 네트워크 영역에서 스캔** (클라이언트 네트워크 아님) | `200 DiscoveredCamera[]` · 비POST 405 |
 | POST | `/api/cameras/test-onvif` | 미등록 카메라 ONVIF 연결 테스트 (본문에 자격증명) | `200 TestONVIFResponse` (실패도 200 본문) |
 | POST | `/api/cameras/test-direct` | 직접 스트림 URL 검증 (rtsp/rtmp = TCP 도달성, rtp = 형식) | `200 TestDirectStreamResponse` |
 | POST | `/api/onvif/profiles` | 미등록 카메라 프로필 조회 (본문에 자격증명) | `200 ProfileDTO[]` · 비POST 405 |
@@ -802,12 +802,12 @@ R.2 다중 스토리지 페일오버 · R.3 재생(`GET /api/recordings/*` + Pla
 | F2b | `092a1b8` | 타일이 "키프레임 대기" 오류로 고착 | 패킷 수(60개) 기준 워치독 — 중간 GOP 참여는 첫 IDR까지 최대 2초라 항상 오판 | 시간 기준 워치독 + `decoded` 이벤트로 상태 전환 | 패킷 수는 비트레이트에 따라 의미가 다르다. 시간으로 판정하라 |
 | F3 | `cb920fe` | "20초간 키프레임 미수신" | `new Uint8Array(n)`이 길이 n의 0 배열 — 재조립 NALU 헤더가 0x00, 쓰레기 프리픽스 | FU-A 재조립 헤더 수정, 큐 상한 150→1200 | `new Uint8Array(n)` vs `[n]`은 바이트 코드 최빈 버그. 재생 하네스가 추측을 없앴다 |
 | F4 | `2ddd8f0` | 1CH 미출력 + 드롭 다수 | 허브 버퍼 30 = "30프레임" 의도였으나 RTP 패킷 단위로 1프레임 — 1080p 버스트에 매 프레임 오버플로 | 허브 버퍼 512 + `rtp_batch` 배치 전송 | 유실 위치는 시퀀스 번호로 양단을 계량해 확정하라. 유실률 3.72% → 0.00% |
-| F5 | `ccaf1bb` | DevServer 브라우저에서 영상 미출력 | Wails 바인딩 의존이 설계 오류 | v1.1 서버 중심 전환 — `/api/*` REST 13종, 프론트 fetch, Wails 셸화, 8080 단일 | "N번째 클라이언트"와 브라우저는 첫 클라이언트와 상태가 다르다 |
+| F5 | `ccaf1bb` | DevServer 브라우저에서 영상 미출력 | Wails 바인딩 의존이 설계 오류 | v1.1 서버 중심 전환 — `/api/*` REST 13종, 프론트 fetch, Wails 셸화, 25480 단일 | "N번째 클라이언트"와 브라우저는 첫 클라이언트와 상태가 다르다 |
 | F6 | `6dfc8e4`/`4ad2688` | (Phase 5 구현) | — | 통계 대시보드, 설정 페이지, 백업/복원, `ensureMasterKey` 마이그레이션, 서버측 Decoder 스텁 | 마스터 키 신규 생성 시 폴백 키 비밀번호 자동 재암호화 |
 | F7 | `6129070` | Safari에서 키프레임 감지되나 출력 0 | WebKit `VideoDecoder`는 `description` 없는 Annex B를 조용히 거부 (Chromium은 허용) | `buildAvcC` + AVCC 우선 → 무출력 시 Annex B 자동 전환 | 코덱 설정은 브라우저별 차이를 후보화해 자동 전환하라 |
 | F8 | `eb1ff05` | AVCC 수정 후에도 Safari 미출력 | WebKit은 **Worker 내 `VideoDecoder` 출력 콜백을 발화하지 않음** | Worker 완전 제거 → `services/decoder.ts` `DecoderHub`로 메인 스레드 통합 | 크로스 브라우저는 메인 스레드 폴백까지 설계에 넣어라. 비동기 API는 Worker 이점이 적다 |
 | F9 | `e74ea79` | 외부 IP 접속 불가 | 127.0.0.1 고정 바인딩 + 프론트 API 주소 하드코딩 | `server.bind` 설정 + 백엔드가 임베디드 UI 서빙 + `location.hostname` 기반 주소 | bind=0.0.0.0은 인증 없는 LAN 노출 |
-| F10 | `cc42710` | 네이티브 셸에서 `wails.localhost:8080` 오류, 목록/설정 공백 | Wails 셸 내부 `location.hostname`이 가상 호스트 `wails.localhost` | `services/backend.ts`에서 `wails.localhost`·빈값 → 127.0.0.1 폴백 | 임베디드 WebView는 가상 호스트를 쓴다. 폴백 목록 필수 |
+| F10 | `cc42710` | 네이티브 셸에서 `wails.localhost:25480` 오류, 목록/설정 공백 | Wails 셸 내부 `location.hostname`이 가상 호스트 `wails.localhost` | `services/backend.ts`에서 `wails.localhost`·빈값 → 127.0.0.1 폴백 | 임베디드 WebView는 가상 호스트를 쓴다. 폴백 목록 필수 |
 | F11 | `30a85a8` | 2사이트 동시 접속 시 한쪽 "undefined 디코딩" 오류 | `StartedEvent`(코덱 메타)를 최초 dial 시 1회만 발행 — 늦은 구독자는 `config.codec === undefined` | `Hub.Subscribe`가 실행 중 스트림 Info를 새 구독자에 즉시 재전송 + `onNotice`로 자가치유 분리 | N번째 클라이언트는 첫 클라이언트와 상태가 다르다. 메시지 `undefined`는 데이터 흐름 단절 지점 |
 | F12 | `d2e2ecd` | (요청) 통계 UI 재배치 | — | fps 스파크라인을 타일 제목 옆으로, 통계 패널을 슬림 바로 축소 | — |
 | F13 | `828227d` | (요청) 끊긴 채널 수동 재시도 없이 자동 복구 | — | Desired-State Reconciler — `desired`가 true인데 `streaming`이 아니면 지수 백오프(1s→15s)로 `start_stream` 재전송 | stop은 사용자 의사를 존중(자동 재시도 중단) |
@@ -849,11 +849,11 @@ R.2 다중 스토리지 페일오버 · R.3 재생(`GET /api/recordings/*` + Pla
 | 2 | 스트림 코어 + WebSocket, 실기 단일 스트림 검증 | 완료 | `4ba94b6` `d3113ac` `601c949` |
 | 3 | 카메라 관리 UI (검색/폼/프로필/테스트/DnD), 야간 관제 테마 | 완료 · 사용자 육안 확인 | `ae283a5` |
 | 4 | 모니터링 그리드 + 디코딩 + WebGL + PTZ | 구현 완료 (안정화 F2~F4 포함) | `81182c9` `c4df2bb` … `2ddd8f0` |
-| 4R | v1.0 → v1.1 서버 중심 재설계 — `/api/*` REST, 프론트 fetch 전환, Wails 셸화, 8080 단일 | 완료 | `39fd2a4` `ccaf1bb` |
+| 4R | v1.0 → v1.1 서버 중심 재설계 — `/api/*` REST, 프론트 fetch 전환, Wails 셸화, 25480 단일 | 완료 | `39fd2a4` `ccaf1bb` |
 | 5 | 통계 대시보드, 설정 페이지, 백업/복원, 마스터 키 관리 | 구현 완료 · 사용자 검증 대기 | `6dfc8e4` `4ad2688` |
 | 6 | JWT 인증 + SQLite 마이그레이션 + 서명/배포/CI | **미착수** (6.1 JWT 일부 진행 후 사용자 지시로 전면 취소) | — |
 
-**Phase 4R (서버 중심 전환)** — DevServer 브라우저에서 영상이 안 나오던 문제와 "프론트는 서버 중계·설정 조회만" 원칙에서, Wails 바인딩 의존이 설계 오류임을 확정하고 v1.1로 재설계했다. `httpapi.go` `/api/*` 13종(위임자만), `onvifCall<T>` 제네릭으로 중복 제거, `ws.Server.StartWithHandler`/`Mux` 분리로 `/ws` + `/api/*` 동일 포트, 프론트 `types/api.ts` + `services/api.ts` fetch 전환, `wailsjs` 생성물 삭제, 8080 점유 시 `os.Exit(1)`.
+**Phase 4R (서버 중심 전환)** — DevServer 브라우저에서 영상이 안 나오던 문제와 "프론트는 서버 중계·설정 조회만" 원칙에서, Wails 바인딩 의존이 설계 오류임을 확정하고 v1.1로 재설계했다. `httpapi.go` `/api/*` 13종(위임자만), `onvifCall<T>` 제네릭으로 중복 제거, `ws.Server.StartWithHandler`/`Mux` 분리로 `/ws` + `/api/*` 동일 포트, 프론트 `types/api.ts` + `services/api.ts` fetch 전환, `wailsjs` 생성물 삭제, 25480 점유 시 `os.Exit(1)`.
 
 ---
 
@@ -874,7 +874,7 @@ go build -o webnvr-server ./cmd/server && ./webnvr-server
 ./build/bin/webnvr.app/Contents/MacOS/webnvr -headless
 
 # 프론트엔드만 개발 서버로 (백엔드는 위에서 띄운 상태)
-cd frontend && npm run dev   # http://localhost:5173 → :8080 백엔드 자동 연결
+cd frontend && npm run dev   # http://localhost:5173 → :25480 백엔드 자동 연결
 ```
 
 ### 9.2 빌드
@@ -887,9 +887,9 @@ HTTPS는 `WEB_CERT`/`WEB_KEY` 환경변수에 인증서 경로를 넣는다(`run
 
 ### 9.3 외부 접근 · 포트포워딩
 
-- UI·API·WS가 전부 `:8080` 하나라서 **TCP 8080 한 포트만 포워딩**하면 된다. 호스트는 `server.bind: "0.0.0.0"`이어야 한다(현재 기본값).
-- `services/backend.ts`가 포트를 `8080`(HTTP)/`8443`(HTTPS)으로 **하드코딩**하므로 외부 포트도 반드시 같아야 한다. `80 → 8080` 같은 번호 변경 포워딩은 프론트가 `공인IP:8080`으로 API/WS를 호출해 실패한다. 리버스 프록시를 표준 포트에 두려면 `backend.ts`를 `location.port` 기반으로 고쳐야 한다.
-- **인증이 없다.** 8080을 인터넷에 열면 누구나 영상 조회·카메라 CRUD·설정 변경·PTZ·백업 다운로드가 가능하다. 포트포워딩보다 **VPN(WireGuard/Tailscale)** 을 권장하고, 불가피하면 공유기 소스 IP 제한 + 앞단 프록시 Basic 인증 + HTTPS.
+- UI·API·WS가 전부 `:25480` 하나라서 **TCP 25480 한 포트만 포워딩**하면 된다. 호스트는 `server.bind: "0.0.0.0"`이어야 한다(현재 기본값).
+- `services/backend.ts`가 포트를 `25480`(HTTP)/`8443`(HTTPS)으로 **하드코딩**하므로 외부 포트도 반드시 같아야 한다. `80 → 25480` 같은 번호 변경 포워딩은 프론트가 `공인IP:25480`으로 API/WS를 호출해 실패한다. 리버스 프록시를 표준 포트에 두려면 `backend.ts`를 `location.port` 기반으로 고쳐야 한다.
+- **인증이 없다.** 25480을 인터넷에 열면 누구나 영상 조회·카메라 CRUD·설정 변경·PTZ·백업 다운로드가 가능하다. 포트포워딩보다 **VPN(WireGuard/Tailscale)** 을 권장하고, 불가피하면 공유기 소스 IP 제한 + 앞단 프록시 Basic 인증 + HTTPS.
 
 ### 9.4 진단 도구
 
@@ -915,7 +915,7 @@ HTTPS는 `WEB_CERT`/`WEB_KEY` 환경변수에 인증서 경로를 넣는다(`run
 ### 10.1 현재 상태
 
 - HEAD `1f3e167`. Phase 1~5는 코드 레벨에서 완료, 사용자 실기 검증 대기(Phase 4 렌더링/PTZ, Phase 5 설정/통계/전체화면).
-- 확정 아키텍처 — 백엔드 = REST + WS + UI 서빙 (8080, `server.bind` 기본 `0.0.0.0`), 프론트 = fetch + WS 클라이언트(`backend.ts`), 디코딩 = 메인 스레드. 재생 = 클라이언트별 독립(진입=자동 시작, 이탈=정지, 리컨실리어 자동 복구), Hub 참조 카운팅. RTSP = gortsplib 벤더링 + `AllowSSRCChange`, ONVIF URI 캐시 TTL 30s + 실패 무효화, 청크 포맷 = Annex B 기본 → AVCC 폴백 + 기억.
+- 확정 아키텍처 — 백엔드 = REST + WS + UI 서빙 (25480, `server.bind` 기본 `0.0.0.0`), 프론트 = fetch + WS 클라이언트(`backend.ts`), 디코딩 = 메인 스레드. 재생 = 클라이언트별 독립(진입=자동 시작, 이탈=정지, 리컨실리어 자동 복구), Hub 참조 카운팅. RTSP = gortsplib 벤더링 + `AllowSSRCChange`, ONVIF URI 캐시 TTL 30s + 실패 무효화, 청크 포맷 = Annex B 기본 → AVCC 폴백 + 기억.
 - 미해결 이슈 없음.
 
 ### 10.2 위험 요소
@@ -946,6 +946,7 @@ HTTPS는 `WEB_CERT`/`WEB_KEY` 환경변수에 인증서 경로를 넣는다(`run
 
 | 버전 | 일자 | 변경 |
 |------|------|------|
+| v1.2.1 | 2026-09-11 | **WS-Discovery 검색 영역 명시** — 네트워크 검색은 백엔드 서버의 네트워크 영역(백엔드 NIC로 프로브 송신)에서 수행되며 클라이언트 브라우저 네트워크가 아님을 §3 discovery.go/§4 DiscoveryPanel/§5.1 discover 엔드포인트에 명시. UI 힌트·토스트도 주체를 백엔드 서버로 명확화 |
 | 1.0 | 2026-08-29 | 초안 (Wails 바인딩 중심 설계) |
 | 1.1 | 2026-08-31 | 서버 중심 재설계 — 카메라 관리를 HTTP REST로 이행, 프론트를 순수 클라이언트로 정의. `architecture.md` |
 | v1 (본 문서) | 2026-09-03 | 전체 재정리 — Phase 5 완료, 파일 로깅, 헤드리스 실행, 안정화 F1~F18, UI 상세, 운영/외부 접근. `architecture_v1.md` |
