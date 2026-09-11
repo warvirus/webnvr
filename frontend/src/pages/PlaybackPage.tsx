@@ -477,7 +477,8 @@ export function PlaybackPage() {
               </div>
             )}
           </div>
-          <button className="btn" disabled={!camId || loading} onClick={() => { loadTimeline(); loadOverview(); }}>
+          {/* 고정 폭 — 로딩 문구로 폭이 변해 좌측 박스(날짜 행 기준)가 출렁이는 것을 막는다 */}
+          <button className="btn btn-refresh" disabled={!camId || loading} onClick={() => { loadTimeline(); loadOverview(); }}>
             {loading ? '불러오는 중…' : '새로고침'}
           </button>
         </div>

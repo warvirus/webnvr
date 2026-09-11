@@ -940,6 +940,12 @@ input, select { font-family: inherit; }
 .date-row > .btn:last-child {
   margin-left: auto; /* 폭이 남으면 끝선 정렬(보통 내용 폭과 같아져 인접한다) */
 }
+/* 새로고침 버튼 고정 폭 — '불러오는 중…'/'새로고침' 문구 차이로 폭이 변하지 않게 한다.
+   긴 문구 기준으로 맞추며, 좌측 박스 폭(날짜 행 기준)도 함께 안정된다. */
+.btn-refresh {
+  min-width: 108px;
+  justify-content: center;
+}
 .date-anchor {
   position: relative; /* 달력 팝업의 기준점 */
 }
