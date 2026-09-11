@@ -8,6 +8,9 @@ ONVIF 카메라 자동 검색 · 멀티뷰 실시간 스트리밍 · PTZ 제어 
 - ONVIF `네트워크 검색` 은 **백엔드 서버가 자신의 네트워크 영역에서 수행**한다 — 카메라를 찾는 대상 망은 서버 쪽이며, 접속한 클라이언트(브라우저)의 네트워크가 아니다
 - 상세 설계는 `doc/architecture.md` 참조
 
+<img src="./doc/architecture_diagram.png"/>
+
+
 ## 사전 준비
 
 - Go 1.27+
@@ -214,6 +217,21 @@ curl http://your_id.iptime.org:25480/api/health
   규칙의 내부 IP/포트 오탈자 ③macOS 방화벽이 활성이면 `시스템 설정 → 네트워크 → 방화벽`
   에서 수신 허용 ④CGNAT 여부 (0 번 항목).
 
+- 메인화면
+  <image src="./doc/main1.png"/>
+- 검색화면-달력
+  <image src="./doc/search1.png"/>
+- 검색화면
+  <image src="./doc/search2.png"/>
+- 카메라설정
+  <image src="./doc/setting1.png"/>
+- 기본설정
+  <image src="./doc/setting2.png"/>
+- 실행화면
+<video controls width="100%">
+  <source src="./doc/webnvr4.mp4" type="video/mp4">
+</video>
+
 ### 4. 포트 변경 시
 
 - 앱 설정 화면에서 `ws_port` 를 저장하면 서버가 **자동으로 새 포트에 재바인딩**한다
@@ -221,7 +239,7 @@ curl http://your_id.iptime.org:25480/api/health
 - 다만 공유기의 포트 포워딩 규칙은 코드와 무관하므로, **외부 포트/내부 포트를 새 값에
   맞춰 직접 수정**해야 한다.
 
-### 5. 보안 경고 (Phase 6 이전)
+### 5. 보안 경고 
 
 - 현재 서버에는 **인증이 없다** (JWT 는 Phase 6.1 계획). 포트 포워딩이 활성화된 동안
   인터넷의 누구나 카메라 영상 열람 · PTZ 제어 · 설정 변경을 할 수 있다.
