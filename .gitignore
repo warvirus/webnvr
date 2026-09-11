@@ -138,3 +138,6 @@ core.*
 nohup.out/webnvr-server
 
 server
+
+# 로컬 전용 — 도메인/포트 등 환경별 설정 포함 (이력 제거됨, 2026-09-11)
+frontend/vite.config.ts
