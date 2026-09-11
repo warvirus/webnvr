@@ -83,16 +83,52 @@ New-NetFirewallRule -DisplayName "webnvr" -Direction Inbound -Action Allow `
 - 설정/DB 는 macOS 와 동일하게 실행 위치의 `config\` 를 상대 경로로 읽는다 —
   반드시 **저장소 루트** 에서 실행할 것. 포트·바인드·자동 재바인딩 동작은 위와 같다.
 
-### 3. 프론트엔드만 개발 서버로
+### 3. 프론트엔드만 (개발 서버) — 백엔드와 독립 운영
 
-백엔드(위 2번)를 띄운 상태에서 다른 터미널에서 실행한다.
+프론트엔드는 Vite 개발 서버로 백엔드와 **따로 띄우고 따로 재시작**할 수 있다.
+React/TS 소스를 수정하면 빌드 없이 브라우저에 즉시 반영된다 (HMR 핫 리로드).
 
 ```bash
-cd frontend && npm run dev
+cd frontend
+npm install        # 첫 실행 전 1 회 — 의존성 설치
+npm run dev        # http://localhost:5173
 ```
 
-`http://localhost:5173` 접속 시 `services/backend.ts` 가 접속 호스트를 기준으로
-`:25480` 백엔드에 자동 연결한다 (백엔드가 CORS 허용).
+- **API/WS 연결 방식**: 프론트는 항상 자기 오리진(5173) 으로 `/api`, `/ws` 를 요청하고,
+  Vite 프록시가 그걸 백엔드로 전달한다. 백엔드 주소를 코드에 박지 않으므로
+  **백엔드 포트가 바뀌어도 프론트 코드는 손대지 않는다** — `BACKEND_PORT` 로 프록시
+  대상만 지정하면 된다.
+
+```bash
+BACKEND_PORT=25480 npm run dev                    # macOS/Linux (bash/zsh)
+$env:BACKEND_PORT="25480"; npm run dev           # Windows (PowerShell)
+```
+
+- `BACKEND_PORT` 미지정 시 `vite.config.ts` 의 기본값 (현재 `25480`) 을 따른다.
+- 5173 이 사용 중이면 다른 포트가 자동 지정된다 (터미널 출력 확인).
+- LAN 의 다른 기기에서도 `http://<서버IP>:5173` 로 개발 화면을 볼 수 있다
+  (`allowedHosts` 에 등록된 도메인 — 예: `warvirus.iptime.org:5173` — 도 동작).
+
+**독립 운영 시나리오**
+
+| 상황 | 동작 |
+|------|------|
+| 백엔드 없이 프론트만 실행 | 화면은 뜬다. "N 초 후 재시도" 재연결 오버레이가 표시되고, 백엔드가 올라오면 **자동으로 연결 복구** (WS 지수 백오프 재연결 + 카메라 목록 재조회) |
+| 백엔드만 재시작 (포트 변경 포함) | 프론트는 페이지를 유지한 채 재연결된다. `ws_port` 변경 시 vite 도 `BACKEND_PORT` 를 바꿔 재시작하면 된다 |
+| frontend 코드만 수정 | 백엔드는 계속 동작 — 페이지 새로고침/HMR 로만 반영되고 서버 재시작이 필요 없다 |
+| 백엔드 코드 수정 후 재기동 | 프론트는 그대로, WS 재연결 시점에 자동 복구 |
+
+**프로덕션 빌드도 분리 가능**
+
+```bash
+cd frontend && npm run build     # frontend/dist 생성
+```
+
+- `frontend/dist` 가 있으면 **백엔드가 같은 포트에서 UI 를 함께 서빙**한다 (단일 오리진,
+  위 포트 포워딩도 하나면 된다) — 권장 구성.
+- 별도 정적 서버 (nginx, Apache 등) 에 `dist` 를 올려 **프론트만 따로 배포**할 수도 있다.
+  이 경우 그 정적 서버에서 `/api` 와 `/ws`(WebSocket 업그레이드 포함) 를 백엔드로
+  리버스 프록시해야 한다 — 프론트는 "같은 오리진 = 백엔드" 를 전제하기 때문이다.
 
 ## 빌드
 
