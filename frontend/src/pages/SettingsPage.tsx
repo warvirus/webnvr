@@ -70,7 +70,7 @@ export function SettingsPage() {
     try {
       const saved = await api.updateAppConfig(cfg);
       setCfg(saved);
-      pushToast('ok', '설정이 저장되었습니다. 녹화 모드/한도는 즉시 반영되며, 저장 경로·세그먼트 길이는 재시작 후 적용됩니다.');
+      pushToast('ok', '설정이 저장되었습니다. 녹화 모드/한도는 즉시 반영되며, ws_port·bind 변경 시 서버가 자동 재시작됩니다. 저장 경로·세그먼트 길이는 재시작 후 적용됩니다.');
       recordings.status().then(setRecStatus).catch(() => {});
     } catch (e) {
       pushToast('error', `설정 저장 실패: ${String(e)}`);

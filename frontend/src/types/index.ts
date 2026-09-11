@@ -39,10 +39,12 @@ export interface ServerMsg {
     | 'recording_state'
     | 'stats'
     | 'pong'
-    | 'client_limit_exceeded';
+    | 'client_limit_exceeded'
+    | 'server_restarting';
   cameraId?: string;
   reason?: string;
   error?: string;
+  port?: number; // server_restarting — 새 서비스 포트
   // stream_started
   codec?: string; // 'h264' | 'h265'
   ssrc?: number;

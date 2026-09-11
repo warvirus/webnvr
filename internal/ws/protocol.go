@@ -21,10 +21,11 @@ type PTZCommand struct {
 // ServerMsg는 서버가 클라이언트로 보내는 메시지다.
 // 목적별 필드가 하나의 구조체에 모여 있으며 omitempty로 필요한 필드만 직렬화된다.
 type ServerMsg struct {
-	Type     string `json:"type"` // stream_started|rtp_packet|stream_stopped|stream_error|cameras_changed|config_changed|stats|pong|client_limit_exceeded
+	Type     string `json:"type"` // stream_started|rtp_packet|stream_stopped|stream_error|cameras_changed|config_changed|recording_state|rtp_batch|server_restarting|pong|client_limit_exceeded
 	CameraID string `json:"cameraId,omitempty"`
 	Reason   string `json:"reason,omitempty"`
 	Error    string `json:"error,omitempty"`
+	Port     int    `json:"port,omitempty"` // server_restarting — 새 서비스 포트
 
 	// stream_started
 	Codec       string `json:"codec,omitempty"`
@@ -71,6 +72,7 @@ const (
 	MsgStats               = "stats"
 	MsgPong                = "pong"
 	MsgClientLimitExceeded = "client_limit_exceeded"
+	MsgServerRestart       = "server_restarting" // ws_port/bind/tls_port 변경 — 클라이언트가 새 포트로 이동 또는 셸 reload
 )
 
 // RTPPacketItem은 rtp_batch의 개별 패킷이다. JSON 크기 절감을 위해 축약 키를 사용한다.

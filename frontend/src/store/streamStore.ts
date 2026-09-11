@@ -3,6 +3,7 @@
 // VideoDecoder 출력이 동작하지 않는 사례 대응 — F8). VideoDecoder는 비동기 HW 가속.
 import {create} from 'zustand';
 import {wsService} from '../services/ws';
+import {isWailsShell} from '../services/backend';
 import {useCameraStore} from './cameraStore';
 import {consumeSelfEdit} from './selfEdits';
 import {useUIStore} from './uiStore';
@@ -341,6 +342,28 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
         case 'config_changed':
           window.dispatchEvent(new CustomEvent('webnvr-config-changed'));
           break;
+        case 'server_restarting': {
+          // ws_port/bind/tls_port 변경으로 백엔드가 리스너를 재바인딩한다.
+          const newPort = msg.port ?? 0;
+          const toast = useUIStore.getState().pushToast;
+          if (import.meta.env.DEV) {
+            // 개발 서버는 프록시 타깃(BACKEND_PORT)이 고정 — 재시작이 필요하다
+            toast('info', `백엔드 포트가 ${newPort}로 변경되었습니다 — vite를 BACKEND_PORT=${newPort}로 재시작하세요`);
+            break;
+          }
+          if (isWailsShell()) {
+            // 셸: reload하면 index.html이 재주입되어 새 포트로 연결된다
+            toast('info', '설정 저장으로 서버가 재시작됩니다 — 잠시 후 자동 복구됩니다');
+            window.setTimeout(() => window.location.reload(), 1500);
+            break;
+          }
+          // 브라우저(백엔드 서빙 UI): 새 포트 오리진으로 이동한다
+          toast('info', `포트 ${newPort}로 이동합니다…`);
+          window.setTimeout(() => {
+            window.location.href = `${location.protocol}//${location.hostname}:${newPort}`;
+          }, 1500);
+          break;
+        }
         case 'pong':
           break;
       }

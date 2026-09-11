@@ -18,7 +18,7 @@
 const WAILS_FALLBACK_PORT = 8080;
 
 // isWailsShell은 Wails 네이티브 셸 컨텍스트인지 판정한다 (가상 호스트).
-function isWailsShell(): boolean {
+export function isWailsShell(): boolean {
   if (typeof location === 'undefined') return false;
   const h = (location.hostname || '').toLowerCase();
   return !h || h === 'wails.localhost' || h.endsWith('.wails.localhost');

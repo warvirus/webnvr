@@ -265,12 +265,16 @@ func RegisterHTTP(mux *http.ServeMux, app *App) {
 			writeErr(w, he)
 			return
 		}
+		oldServer := app.Camera.AppConfig().Server // 변경 전 스냅샷 — 포트/바인드/tls 변경 감지용
 		saved, err := app.Camera.UpdateAppConfig(cfg)
 		if err != nil {
 			writeErr(w, errBadReq(err.Error()))
 			return
 		}
 		writeJSON(w, http.StatusOK, saved)
+		// ws_port/bind/tls_port가 바뀌면 리스너를 새 설정으로 재바인딩한다 (응답 이후 비동기).
+		// 클라이언트는 server_restarting 브로드캐스트를 받아 새 주소로 이동/셸은 reload한다.
+		go app.ApplyServerRestart(oldServer)
 	})
 
 	// 백업: 카메라 목록(비밀번호 제외) + 앱 설정을 하나의 JSON으로 내려준다.
