@@ -6,11 +6,13 @@ import (
 	"context"
 	"embed"
 	"flag"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/wailsapp/wails/v2"
@@ -45,12 +47,12 @@ func main() {
 		os.Exit(1)
 	}
 	if err := appCtx.StartWSServer(http.FS(uiFS)); err != nil {
-		slog.Error("HTTP/WS 서버 시작 실패 — 8080 포트를 점유한 프로세스를 종료하거나 config/app.json의 ws_port를 변경하세요", "err", err)
+		slog.Error("HTTP/WS 서버 시작 실패 — 해당 포트를 점유한 프로세스를 종료하거나 설정의 ws_port를 변경하세요", "err", err)
 		appCtx.Close() // 녹화 세그먼트 flush 포함 정리
 		os.Exit(1)
 	}
 
-	for _, u := range api.LANAddresses(8080) {
+	for _, u := range api.LANAddresses(appCtx.BackendPort()) {
 		slog.Info("LAN 접속 가능: " + u + " (server.bind가 0.0.0.0일 때)")
 	}
 
@@ -64,13 +66,33 @@ func main() {
 		return
 	}
 
-	err = wails.Run(&options.App{
-		Title:  "webnvr",
-		Width:  1280,
-		Height: 800,
-		AssetServer: &assetserver.Options{
-			Assets: assets,
+	// Wails 셸은 가상 호스트(wails.localhost)로 UI를 서빙하므로 프론트가 백엔드 포트를
+	// 추론할 수 없다 — assetserver 미들웨어가 index.html에 실제 포트를 주입해
+	// 프론트가 127.0.0.1:<포트>로 접속하게 한다 (포트 변경 유동화).
+	backendPort := appCtx.BackendPort()
+	inject := fmt.Sprintf(`<script>window.__WEBNVR_BACKEND_PORT__=%d</script>`, backendPort)
+	assetServer := &assetserver.Options{
+		Assets: assets,
+		Middleware: func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+					if b, err := assets.ReadFile("frontend/dist/index.html"); err == nil {
+						html := strings.Replace(string(b), "<head>", "<head>"+inject, 1)
+						w.Header().Set("Content-Type", "text/html; charset=utf-8")
+						_, _ = w.Write([]byte(html))
+						return
+					}
+				}
+				next.ServeHTTP(w, r)
+			})
 		},
+	}
+
+	err = wails.Run(&options.App{
+		Title:            "webnvr",
+		Width:            1280,
+		Height:           800,
+		AssetServer:      assetServer,
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
 		// 영상 검색 진입 시 첫 영상 자동 재생 — WKWebView 기본 정책(제스처 필요) 해제.
 		// NVR은 페이지 진입만으로 녹화가 바로 보여야 한다.

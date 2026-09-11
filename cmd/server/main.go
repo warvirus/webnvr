@@ -19,7 +19,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 빌드된 프론트엔드가 있으면 :8080/ 로 함께 서빙, 없으면 API/WS만 제공
+	// 빌드된 프론트엔드가 있으면 서비스 포트(/)로 함께 서빙, 없으면 API/WS만 제공
 	var ui http.FileSystem
 	if st, err := os.Stat("frontend/dist"); err == nil && st.IsDir() {
 		ui = http.Dir("frontend/dist")
@@ -28,11 +28,11 @@ func main() {
 	}
 
 	if err := appCtx.StartWSServer(ui); err != nil {
-		slog.Error("HTTP/WS 서버 시작 실패 — 8080 포트를 점유한 프로세스를 종료하거나 config/app.json의 ws_port를 변경하세요", "err", err)
+		slog.Error("HTTP/WS 서버 시작 실패 — 해당 포트를 점유한 프로세스를 종료하거나 설정의 ws_port를 변경하세요", "err", err)
 		appCtx.Close() // 녹화 세그먼트 flush 포함 정리
 		os.Exit(1)
 	}
-	for _, u := range api.LANAddresses(8080) {
+	for _, u := range api.LANAddresses(appCtx.BackendPort()) {
 		slog.Info("LAN 접속 가능: " + u + " (server.bind가 0.0.0.0일 때)")
 	}
 

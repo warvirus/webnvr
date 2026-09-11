@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -27,12 +26,13 @@ type Server struct {
 	ctrl       Controller
 	addr       string
 	maxClients func() int // 최대 동시 접속 수 (nil 또는 0 반환 = 무제한)
+	TLSPort    int        // HTTPS/WSS 보조 포트 (WEB_CERT/WEB_KEY 설정 시, 0이면 8443)
 
-	mu        sync.Mutex
-	ln        net.Listener
-	http      *http.Server
-	https     *http.Server // HTTPS(8443) 보조 서버 — Stop에서 함께 종료된다
-	conns     map[*connState]struct{}
+	mu    sync.Mutex
+	ln    net.Listener
+	http  *http.Server
+	https *http.Server // HTTPS 보조 서버 — Stop에서 함께 종료된다
+	conns map[*connState]struct{}
 }
 
 // NewServer는 컨트롤러와 바인딩 주소로 서버를 생성한다.
@@ -54,7 +54,7 @@ func (s *Server) Start() error {
 
 // StartWithHandler는 지정 핸들러로 서버를 시작한다. (비블로킹)
 // 호출자가 /ws 외의 추가 라우트(예: /api/*)를 mux에 등록해 사용할 수 있다.
-// HTTPS 인증서가 있으면 HTTP + HTTPS 동시 지원 (다른 포트: HTTP=:8080, HTTPS=:8443)
+// HTTPS 인증서가 있으면 HTTP + HTTPS 동시 지원 (다른 포트: HTTP=ws_port, HTTPS=tls_port)
 func (s *Server) StartWithHandler(h http.Handler) error {
 	ln, err := net.Listen("tcp", s.addr)
 	if err != nil {
@@ -78,9 +78,17 @@ func (s *Server) StartWithHandler(h http.Handler) error {
 		}
 	}()
 
-	// HTTPS 인증서가 있으면 HTTPS 서버도 별도 포트에서 시작
+	// HTTPS 인증서가 있으면 HTTPS 서버도 별도 포트에서 시작 (tls_port, 기본 8443)
 	if certFile != "" && keyFile != "" {
-		httpsAddr := strings.Replace(s.addr, ":8080", ":8443", 1)
+		tlsPort := s.TLSPort
+		if tlsPort <= 0 {
+			tlsPort = 8443
+		}
+		host, _, err := net.SplitHostPort(s.addr)
+		if err != nil {
+			host = s.addr
+		}
+		httpsAddr := fmt.Sprintf("%s:%d", host, tlsPort)
 		lnTLS, err := net.Listen("tcp", httpsAddr)
 		if err != nil {
 			slog.Warn("HTTPS 포트 바인딩 실패", "addr", httpsAddr, "err", err)

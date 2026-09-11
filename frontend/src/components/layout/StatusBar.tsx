@@ -12,7 +12,7 @@ export function StatusBar() {
   const stateText = connected ? '백엔드 연결됨' : reconnectAt ? '재연결 대기 중' : '연결 안 됨';
   return (
     <footer className="statusbar">
-      <span>WS <b>{`${backendHost()}:8080`}</b></span>
+      <span>WS <b>{backendHost()}</b></span>
       <span className={connected ? 'live' : 'down'}>● {stateText}</span>
       <span>스트림 <b>{streaming}</b>/{wanted}</span>
       <span style={{marginLeft: 'auto'}}>webnvr v0.1</span>

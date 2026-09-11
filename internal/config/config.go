@@ -14,9 +14,10 @@ type AppConfig struct {
 
 // ServerConfig는 HTTP/WS 서버의 바인드 주소와 포트 설정을 나타낸다.
 type ServerConfig struct {
-	WSPort    int    `json:"ws_port"`
-	HTTPPort  int    `json:"http_port"`
-	Bind      string `json:"bind"` // "127.0.0.1"(기본, 로컬 전용) 또는 "0.0.0.0"(LAN 공개)
+	WSPort     int    `json:"ws_port"`
+	TLSPort    int    `json:"tls_port"` // HTTPS/WSS 보조 포트 (WEB_CERT/WEB_KEY 설정 시, 0이면 기본 8443)
+	HTTPPort   int    `json:"http_port"`
+	Bind       string `json:"bind"`        // "127.0.0.1"(기본, 로컬 전용) 또는 "0.0.0.0"(LAN 공개)
 	MaxClients int    `json:"max_clients"` // 최대 동시 접속 수 (0 = 무제한)
 }
 
@@ -52,16 +53,16 @@ type LoggingConfig struct {
 // RecordingConfig는 백엔드 녹화(Phase R) 동작을 나타낸다.
 // enabled=false면 녹화기가 생성되지 않고 기존 동작이 완전히 유지된다.
 type RecordingConfig struct {
-	Enabled        bool             `json:"enabled"`
-	MaxUsageGB     float64          `json:"max_usage_gb"`     // 0 = 무제한(디스크 한도까지)
-	ReclaimPercent int              `json:"reclaim_percent"`  // 한도 초과 시 삭제로 확보할 여유 비율
-	RetentionDays  int              `json:"retention_days"`   // 0 = 시간 제한 없음
-	KeepMinHours   int              `json:"keep_min_hours"`   // 이보다 최근 녹화는 공간 부족해도 유지
-	ReconcileHours int              `json:"reconcile_hours"`  // 발자국 재조정(SUM(bytes)+du 대조) 주기
-	Storages       []StorageConfig  `json:"storages"`         // fill-then-next
-	SegmentSeconds int              `json:"segment_seconds"`  // 세그먼트 목표 길이
-	SegmentMaxMB   int              `json:"segment_max_mb"`   // 키프레임이 안 와도 이 크기에서 강제 컷
-	Transcode      TranscodeConfig  `json:"transcode"`        // 후속 H — v1은 비활성
+	Enabled        bool            `json:"enabled"`
+	MaxUsageGB     float64         `json:"max_usage_gb"`    // 0 = 무제한(디스크 한도까지)
+	ReclaimPercent int             `json:"reclaim_percent"` // 한도 초과 시 삭제로 확보할 여유 비율
+	RetentionDays  int             `json:"retention_days"`  // 0 = 시간 제한 없음
+	KeepMinHours   int             `json:"keep_min_hours"`  // 이보다 최근 녹화는 공간 부족해도 유지
+	ReconcileHours int             `json:"reconcile_hours"` // 발자국 재조정(SUM(bytes)+du 대조) 주기
+	Storages       []StorageConfig `json:"storages"`        // fill-then-next
+	SegmentSeconds int             `json:"segment_seconds"` // 세그먼트 목표 길이
+	SegmentMaxMB   int             `json:"segment_max_mb"`  // 키프레임이 안 와도 이 크기에서 강제 컷
+	Transcode      TranscodeConfig `json:"transcode"`       // 후속 H — v1은 비활성
 }
 
 // StorageConfig는 녹화 저장 대상 하나다.
@@ -87,6 +88,7 @@ func Default() *AppConfig {
 		Version: CurrentVersion,
 		Server: ServerConfig{
 			WSPort:     8080,
+			TLSPort:    8443,
 			HTTPPort:   8081,
 			Bind:       "0.0.0.0",
 			MaxClients: 0,

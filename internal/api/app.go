@@ -156,7 +156,7 @@ func ensureMasterKey(configDir string, mgr *camera.Manager) error {
 	return nil
 }
 
-// StartWSServer는 설정된 바인드 주소(:8080)에 HTTP/WS 서버를 시작한다.
+// StartWSServer는 설정된 바인드 주소(설정 ws_port)에 HTTP/WS 서버를 시작한다.
 // mux: /ws(스트림 중계) + /api/*(REST, v1.1) + /(프론트 UI). 포트 충돌 시 오류를 반환한다.
 func (a *App) StartWSServer(assets http.FileSystem) error {
 	bind := a.Camera.appCfg.Server.Bind
@@ -166,6 +166,7 @@ func (a *App) StartWSServer(assets http.FileSystem) error {
 	a.wsServer = ws.NewServer(a.Stream, fmt.Sprintf("%s:%d", bind, a.Camera.appCfg.Server.WSPort), func() int {
 		return a.Camera.AppConfig().Server.MaxClients
 	})
+	a.wsServer.TLSPort = a.Camera.appCfg.Server.TLSPort // 0이면 서버가 기본값(8443) 사용
 	// 카메라/앱 설정 변경을 전 클라이언트에 브로드캐스트하도록 통지자 연결
 	a.Camera.notifier = a.wsServer
 	if a.recording != nil {
@@ -203,6 +204,12 @@ func registerUI(mux *http.ServeMux, assets http.FileSystem) {
 		}
 		fileServer.ServeHTTP(w, r)
 	})
+}
+
+// BackendPort는 설정된 WS 서비스 포트를 반환한다. (Wails 셸의 프론트 포트 주입용 —
+// StartWSServer가 성공하면 실제 바인딩 포트와 동일하다)
+func (a *App) BackendPort() int {
+	return a.Camera.appCfg.Server.WSPort
 }
 
 // LANAddresses는 로컬 머신의 LAN IPv4 주소 목록을 반환한다. (접속 URL 안내용)
