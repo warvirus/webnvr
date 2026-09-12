@@ -227,10 +227,6 @@ curl http://your_id.iptime.org:25480/api/health
   <image src="./doc/setting1.png"/>
 - 기본설정
   <image src="./doc/setting2.png"/>
-- 실행화면
-
-  <!-- GitHub은 <video> 태그를 제거하므로, 동영상은 이미지 문법으로 작성해야 플레이어로 렌더링된다 -->
-  ![실행화면](./doc/webnvr4.mp4)
 
 ### 4. 포트 변경 시
 
