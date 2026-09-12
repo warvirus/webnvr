@@ -228,6 +228,9 @@ curl http://your_id.iptime.org:25480/api/health
 - 기본설정
   <image src="./doc/setting2.png"/>
 
+- 실행화면
+  <image src="./doc/webnvr.gif" />
+
 ### 4. 포트 변경 시
 
 - 앱 설정 화면에서 `ws_port` 를 저장하면 서버가 **자동으로 새 포트에 재바인딩**한다
